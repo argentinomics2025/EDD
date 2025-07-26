@@ -48,8 +48,22 @@ export const dolarApi = {
   // Obtener todas las cotizaciones
   getAll: async () => {
     try {
+      console.log('Fetching dollar data from DolarAPI...');
       const response = await fetchWithTimeout(`${API_CONFIG.dolarApi.baseUrl}/dolares`);
-      return response;
+      console.log('DolarAPI response:', response);
+      
+      // Transformar la respuesta de DolarAPI al formato esperado por nuestro componente
+      const transformedData = response.map(item => ({
+        moneda: "USD",
+        casa: item.casa || item.nombre?.toLowerCase() || 'unknown',
+        nombre: item.nombre || item.casa || 'Unknown',
+        compra: parseFloat(item.compra) || 0,
+        venta: parseFloat(item.venta) || 0,
+        fechaActualizacion: item.fechaActualizacion || new Date().toISOString()
+      }));
+      
+      console.log('Transformed data:', transformedData);
+      return transformedData;
     } catch (error) {
       // Fallback con datos mock si la API falla
       console.warn('DolarAPI failed, using mock data:', error);
@@ -61,7 +75,14 @@ export const dolarApi = {
   getSpecific: async (type) => {
     try {
       const response = await fetchWithTimeout(`${API_CONFIG.dolarApi.baseUrl}/dolares/${type}`);
-      return response;
+      return {
+        moneda: "USD",
+        casa: response.casa || response.nombre?.toLowerCase() || type,
+        nombre: response.nombre || response.casa || type,
+        compra: parseFloat(response.compra) || 0,
+        venta: parseFloat(response.venta) || 0,
+        fechaActualizacion: response.fechaActualizacion || new Date().toISOString()
+      };
     } catch (error) {
       console.warn(`DolarAPI ${type} failed, using mock data:`, error);
       return getMockDolarData().find(d => d.casa.toLowerCase().includes(type.toLowerCase()));
