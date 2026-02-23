@@ -2,7 +2,8 @@ name: Actualizar Precios Bonos
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    # Correr a las 15:30 UTC (12:30 ARG) y 20:30 UTC (17:30 ARG) de Lunes a Viernes
+    - cron: '30 15,20 * * 1-5'
   workflow_dispatch:
 
 jobs:
