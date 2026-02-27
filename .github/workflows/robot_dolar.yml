@@ -28,6 +28,7 @@ jobs:
 
     - name: Ejecutar Robot del Dólar
       env:
+        TZ: 'America/Argentina/Buenos_Aires' # <--- ESTA ES LA LÍNEA MÁGICA
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       # Ajustá esta ruta si guardaste el .py en otra carpeta
