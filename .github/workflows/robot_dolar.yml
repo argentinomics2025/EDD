@@ -1,0 +1,34 @@
+name: 💵 Robot Dólar (Tiempo Real e Historial)
+
+on:
+  workflow_dispatch: # Botón manual por si querés correrlo a mano
+  
+  schedule:
+    # Corre cada 30 minutos, entre las 14:00 y las 21:00 UTC 
+    # (Equivale a 11:00 a 18:00 hora Argentina)
+    # De Lunes a Viernes (1-5)
+    - cron: '*/30 14-21 * * 1-5'
+
+jobs:
+  actualizar-dolares:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Descargar el código
+      uses: actions/checkout@v3
+
+    - name: Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Instalar librerías
+      run: |
+        pip install supabase requests
+
+    - name: Ejecutar Robot del Dólar
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      # Ajustá esta ruta si guardaste el .py en otra carpeta
+      run: python scripts/actualizar_dolar.py
