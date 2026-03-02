@@ -1,10 +1,9 @@
 name: 🏦 Robot Banco Central (Datos Diarios)
 
 on:
-  workflow_dispatch: # Botón manual por si querés correrlo a mano
+  workflow_dispatch: 
   
   schedule:
-    # Corre todos los días a las 23:00 UTC (20:00 hora Argentina)
     - cron: '0 23 * * *'
 
 jobs:
@@ -22,7 +21,7 @@ jobs:
 
     - name: Instalar librerías
       run: |
-        pip install supabase requests urllib3
+        pip install supabase requests urllib3 cloudscraper
 
     - name: Ejecutar Robot del BCRA
       env:
