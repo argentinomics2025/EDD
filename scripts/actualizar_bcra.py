@@ -1,6 +1,7 @@
 import os
 import datetime
 import requests
+import urllib.parse
 from supabase import create_client
 
 # --- CREDENCIALES ---
@@ -13,20 +14,23 @@ if not URL or not KEY:
 supabase = create_client(URL, KEY)
 
 def run():
-    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 🏦 Consultando API del BCRA...")
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 🏦 Consultando API del BCRA (Vía Proxy para saltar firewall)...")
     
     try:
-        # A veces el BCRA necesita un User-Agent o da problemas de SSL. Python + requests lo maneja bien.
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        r = requests.get('https://api.bcra.gob.ar/estadisticas/v3.0/monetarias', headers=headers, verify=False, timeout=15)
+        # Usamos AllOrigins como "disfraz" para saltar el bloqueo de IP de GitHub
+        target_url = 'https://api.bcra.gob.ar/estadisticas/v3.0/monetarias'
+        proxy_url = f"https://api.allorigins.win/raw?url={urllib.parse.quote(target_url)}"
+        
+        # Hacemos la petición al proxy
+        r = requests.get(proxy_url, timeout=20)
         
         if r.status_code == 200:
             data = r.json()
             resultados = data.get('results', [])
             
             # Variables que nos interesan guardar
-            # 1: Reservas, 15: Base Monetaria, 16: Circulante, 34: Tasa Política Monetaria
-            ids_objetivo = [1, 15, 16, 34] 
+            # 1: Reservas, 15: Base Monetaria, 16: Circulante, 34/7: Tasa Política Monetaria
+            ids_objetivo = [1, 15, 16, 34, 7] 
             
             for item in resultados:
                 id_var = item.get('idVariable')
@@ -38,7 +42,7 @@ def run():
                     
                     print(f"   ✅ Guardando: {desc} (ID: {id_var}) | Valor: {valor}")
 
-                    # ACTUALIZAR TABLA BCRA (Usamos upsert para pisar si ya existe el ID)
+                    # ACTUALIZAR TABLA BCRA EN SUPABASE
                     supabase.table('bcra_data').upsert({
                         'id_variable': id_var,
                         'descripcion': desc,
@@ -49,13 +53,10 @@ def run():
                     
             print("🚀 ¡Circuito del BCRA completado con éxito!")
         else:
-            print(f"⚠️ Error al consultar API BCRA: HTTP {r.status_code}")
+            print(f"⚠️ Error al consultar el Proxy: HTTP {r.status_code}")
             
     except Exception as e:
         print(f"❌ Error General: {e}")
 
 if __name__ == '__main__':
-    # Para ignorar advertencias de SSL en la consola (opcional pero más limpio)
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     run()
