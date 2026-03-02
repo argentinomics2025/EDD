@@ -26,7 +26,7 @@ def run():
             resultados = data.get('results', [])
             
             # 1: Reservas, 15: Base Monetaria, 16: Circulante, 34/7: Tasa PM / BADLAR
-            ids_objetivo = [1, 15, 16, 34, 7] 
+            ids_objetivo = [1, 15, 16, 34, 7, 31] 
             guardados = 0
             
             for item in resultados:
