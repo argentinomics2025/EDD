@@ -1,0 +1,32 @@
+name: 🏦 Robot Banco Central (Datos Diarios)
+
+on:
+  workflow_dispatch: # Botón manual por si querés correrlo a mano
+  
+  schedule:
+    # Corre todos los días a las 23:00 UTC (20:00 hora Argentina)
+    - cron: '0 23 * * *'
+
+jobs:
+  actualizar-bcra:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Descargar el código
+      uses: actions/checkout@v3
+
+    - name: Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Instalar librerías
+      run: |
+        pip install supabase requests urllib3
+
+    - name: Ejecutar Robot del BCRA
+      env:
+        TZ: 'America/Argentina/Buenos_Aires' 
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      run: python scripts/actualizar_bcra.py
