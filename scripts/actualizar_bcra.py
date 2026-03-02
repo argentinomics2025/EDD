@@ -12,7 +12,7 @@ if not URL or not KEY:
 
 supabase = create_client(URL, KEY)
 
-# 👇 PEGA ACÁ LA URL LARGÚSIMA QUE TE DIO GOOGLE
+# 👇 TU URL VIP DE GOOGLE
 GOOGLE_PROXY_URL = "https://script.google.com/macros/s/AKfycbwYDidDNhE_9QNlOp3pfScRzd5__0W6hq_UhLTcJuHNXAH6oU-XU7Zj9FPkZd9yzqj0/exec"
 
 def run():
@@ -22,11 +22,26 @@ def run():
         r = requests.get(GOOGLE_PROXY_URL, timeout=30)
         
         if r.status_code == 200:
-            data = r.json()
+            # --- RAYO X 1: COMPROBAR SI ES JSON ---
+            try:
+                data = r.json()
+            except Exception as json_err:
+                print("⚠️ ATENCIÓN: El BCRA/Google no devolvió un formato válido.")
+                print("📦 CONTENIDO CRUDO DEVUELTO:")
+                print(r.text[:1000]) # Muestra los primeros 1000 caracteres del error
+                return
+
+            # --- RAYO X 2: COMPROBAR SI HAY RESULTADOS ---
             resultados = data.get('results', [])
+            if not resultados:
+                print("⚠️ ATENCIÓN: Entramos, pero la caja está vacía o cambió de formato.")
+                print("📦 CONTENIDO EXACTO DEVUELTO:")
+                print(data)
+                return
             
             # 1: Reservas, 15: Base Monetaria, 16: Circulante, 34/7: Tasa PM
             ids_objetivo = [1, 15, 16, 34, 7] 
+            guardados = 0
             
             for item in resultados:
                 id_var = item.get('idVariable')
@@ -45,10 +60,12 @@ def run():
                         'valor': valor,
                         'last_updated': datetime.datetime.now().isoformat()
                     }).execute()
+                    guardados += 1
                     
-            print("🚀 ¡Hack mate al BCRA! Circuito completado con éxito.")
+            print(f"🚀 ¡Hack mate al BCRA! Circuito completado con éxito. Se guardaron {guardados} variables.")
         else:
             print(f"⚠️ Error al consultar el Proxy de Google: HTTP {r.status_code}")
+            print(r.text[:500])
             
     except Exception as e:
         print(f"❌ Error General: {e}")
