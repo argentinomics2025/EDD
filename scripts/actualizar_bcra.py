@@ -29,20 +29,18 @@ def run():
             ids_objetivo = [1, 15, 16, 34, 7, 31] 
             guardados = 0
             
-            for item in resultados:
+           for item in resultados:
                 id_var = item.get('idVariable')
                 
                 if id_var in ids_objetivo:
                     desc = item.get('descripcion', '')
-                    
-                    # 👇 ACÁ ESTÁ LA MAGIA: USAMOS LAS ETIQUETAS NUEVAS DE LA V4.0
                     fecha = item.get('ultFechaInformada')
                     valor = item.get('ultValorInformado')
                     
                     if valor is not None:
                         print(f"   ✅ Guardando: {desc} | Valor: {valor} | Fecha: {fecha}")
 
-                        # ACTUALIZAR TABLA BCRA EN SUPABASE
+                        # 1. ACTUALIZAR LA PIZARRA (Pisa el dato viejo - Para las tarjetas)
                         supabase.table('bcra_data').upsert({
                             'id_variable': id_var,
                             'descripcion': desc,
@@ -50,6 +48,15 @@ def run():
                             'valor': valor,
                             'last_updated': datetime.datetime.now().isoformat()
                         }).execute()
+
+                        # 2. GUARDAR EN EL ARCHIVO (Acumula para el gráfico)
+                        # Usamos upsert basado en la regla UNIQUE para no duplicar si el robot corre 2 veces el mismo día
+                        supabase.table('historial_bcra').upsert({
+                            'id_variable': id_var,
+                            'fecha': fecha,
+                            'valor': valor
+                        }, on_conflict='id_variable,fecha').execute()
+                        
                         guardados += 1
                     
             print(f"🚀 ¡Hack mate al BCRA! Circuito completado con éxito. Se guardaron {guardados} variables.")
