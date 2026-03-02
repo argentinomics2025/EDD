@@ -25,22 +25,24 @@ def run():
             data = r.json()
             resultados = data.get('results', [])
             
-            # 1: Reservas, 15: Base Monetaria, 16: Circulante, 34/7: Tasa PM / BADLAR
+            # 1: Reservas, 15: Base Monetaria, 16: Circulante, 34/7: Tasa PM / BADLAR, 31: UVA
             ids_objetivo = [1, 15, 16, 34, 7, 31] 
             guardados = 0
             
-           for item in resultados:
+            for item in resultados:
                 id_var = item.get('idVariable')
                 
                 if id_var in ids_objetivo:
                     desc = item.get('descripcion', '')
+                    
+                    # Usamos las etiquetas nuevas de la v4.0
                     fecha = item.get('ultFechaInformada')
                     valor = item.get('ultValorInformado')
                     
                     if valor is not None:
                         print(f"   ✅ Guardando: {desc} | Valor: {valor} | Fecha: {fecha}")
 
-                        # 1. ACTUALIZAR LA PIZARRA (Pisa el dato viejo - Para las tarjetas)
+                        # 1. ACTUALIZAR LA PIZARRA (Para las tarjetas - Pisa el dato viejo)
                         supabase.table('bcra_data').upsert({
                             'id_variable': id_var,
                             'descripcion': desc,
@@ -49,17 +51,20 @@ def run():
                             'last_updated': datetime.datetime.now().isoformat()
                         }).execute()
 
-                        # 2. GUARDAR EN EL ARCHIVO (Acumula para el gráfico)
-                        # Usamos upsert basado en la regla UNIQUE para no duplicar si el robot corre 2 veces el mismo día
-                        supabase.table('historial_bcra').upsert({
-                            'id_variable': id_var,
-                            'fecha': fecha,
-                            'valor': valor
-                        }, on_conflict='id_variable,fecha').execute()
-                        
+                        # 2. GUARDAR EN EL ARCHIVO HISTÓRICO (Para el Gráfico - Acumula los datos)
+                        # Nota: Requiere que hayas creado la tabla 'historial_bcra' con UNIQUE(id_variable, fecha)
+                        try:
+                            supabase.table('historial_bcra').upsert({
+                                'id_variable': id_var,
+                                'fecha': fecha,
+                                'valor': valor
+                            }, on_conflict='id_variable,fecha').execute()
+                        except Exception as e:
+                            print(f"      ⚠️ Aviso historial: {e}")
+
                         guardados += 1
                     
-            print(f"🚀 ¡Hack mate al BCRA! Circuito completado con éxito. Se guardaron {guardados} variables.")
+            print(f"🚀 ¡Hack mate al BCRA! Circuito completado con éxito. Se procesaron {guardados} variables.")
         else:
             print(f"⚠️ Error al consultar el Proxy de Google: HTTP {r.status_code}")
             
