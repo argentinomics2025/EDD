@@ -1,5 +1,7 @@
 import os
 import requests
+import csv
+import io
 from supabase import create_client
 
 # --- CREDENCIALES ---
@@ -34,7 +36,6 @@ def run():
                 if val_actual and val_previo:
                     var_mensual = ((val_actual / val_previo) - 1) * 100
                     
-                    # 💡 SIN 'last_updated' para que encaje perfecto con tu tabla actual
                     supabase.table('construccion_actividad').upsert({
                         'fecha': fecha_actual,
                         'indice': round(val_actual, 2),
@@ -50,60 +51,72 @@ def run():
         print(f"❌ Error en Actividad: {e}")
 
     # ==========================================================
-    # 2. ACTUALIZAR INSUMOS (Uno por uno - Antibloqueos)
+    # 2. ACTUALIZAR INSUMOS (Vía CSV Oficial Blindado)
     # ==========================================================
     try:
         print("👉 Buscando Consumo de Insumos (Materiales)...")
+        # Leemos directo el archivo raíz del Estado
+        url_csv = "https://infra.datos.gob.ar/catalog/sspm/dataset/33/distribution/33.3/download/indicador-sintetico-actividad-construccion-insumos-serie-original.csv"
         
-        # Pedimos uno por uno. Si falla alguno, no rompe el resto.
-        mapeo_insumos = {
-            'cemento_portland': '33.3_ISAC_CEMENAND_0_0_21_24',
-            'asfalto': '33.3_ISAC_ASFALLTO_0_0_12_6',
-            'hierro_redondo': '33.3_ISAC_HIERRION_0_0_49_34',
-            'ladrillos_huecos': '33.3_ISAC_LADRICOS_0_0_24_34',
-            'hormigon_elaborado': '33.3_ISAC_HORMIGDO_0_0_26_38',
-            'pinturas': '33.3_ISAC_PINTURAS_0_0_15_18',
-            'pisos_revestimientos': '33.3_ISAC_PISOSCOS_0_0_37_22',
-            'articulos_sanitarios': '33.3_ISAC_ARTICICA_0_0_37_37'
-        }
+        r_csv = requests.get(url_csv, timeout=20)
         
-        datos_por_fecha = {}
-        
-        for mat, api_id in mapeo_insumos.items():
-            url = f"https://apis.datos.gob.ar/series/api/series?ids={api_id}&limit=30&format=json"
-            r = requests.get(url, timeout=15)
+        if r_csv.status_code == 200:
+            texto_csv = r_csv.content.decode('utf-8-sig')
+            reader = csv.DictReader(io.StringIO(texto_csv))
+            filas = list(reader)
             
-            if r.status_code == 200:
-                filas = r.json().get('data', [])
-                for i in range(1, len(filas)):
-                    fecha_previa, val_previo = filas[i-1]
-                    fecha_actual, val_actual = filas[i]
+            # Tomamos los últimos 30 registros
+            ultimas_filas = filas[-30:]
+            guardados_ins = 0
+            
+            # Diccionario para traducir la columna del Estado a tu Supabase
+            mapeo_columnas = {
+                'cemento_portland': 'isac_cemento_portland',
+                'asfalto': 'isac_asfalto',
+                'hierro_redondo': 'isac_hierro_redondo_y_aceros_para_la_construccion',
+                'ladrillos_huecos': 'isac_ladrillos_huecos',
+                'hormigon_elaborado': 'isac_hormigon_elaborado',
+                'pinturas': 'isac_pinturas_para_construccion',
+                'pisos_revestimientos': 'isac_pisos_y_revestimientos_ceramicos',
+                'articulos_sanitarios': 'isac_articulos_sanitarios_de_ceramica'
+            }
+            
+            for i in range(1, len(ultimas_filas)):
+                fila_previa = ultimas_filas[i-1]
+                fila_actual = ultimas_filas[i]
+                
+                fecha = fila_actual.get('indice_tiempo')
+                if not fecha:
+                    continue
+                
+                fecha = fecha.split('T')[0] if 'T' in fecha else fecha
+                
+                fila_supabase = { 'fecha': fecha }
+                
+                for mat_supabase, col_csv in mapeo_columnas.items():
+                    val_actual_str = fila_actual.get(col_csv, '')
+                    val_previo_str = fila_previa.get(col_csv, '')
                     
-                    if fecha_actual not in datos_por_fecha:
-                        datos_por_fecha[fecha_actual] = {'fecha': fecha_actual}
-                    
-                    if val_actual is not None:
-                        datos_por_fecha[fecha_actual][mat] = round(val_actual, 2)
-                        if val_previo:
-                            var = ((val_actual / val_previo) - 1) * 100
-                            datos_por_fecha[fecha_actual][f"var_{mat}"] = round(var, 2)
-            else:
-                print(f"   ⚠️ Aviso: ID no disponible para '{mat}'. Se saltará.")
-
-        # Guardamos todo lo recolectado en tu tabla de Supabase
-        guardados_ins = 0
-        for fecha, fila_supabase in datos_por_fecha.items():
-            try:
-                # También sin last_updated acá
+                    if val_actual_str.strip():
+                        val_actual = float(val_actual_str)
+                        fila_supabase[mat_supabase] = round(val_actual, 2)
+                        
+                        if val_previo_str.strip():
+                            val_previo = float(val_previo_str)
+                            if val_previo > 0:
+                                var = ((val_actual / val_previo) - 1) * 100
+                                fila_supabase[f"var_{mat_supabase}"] = round(var, 2)
+                
                 supabase.table('construccion_insumos').upsert(
                     fila_supabase, on_conflict='fecha'
                 ).execute()
-                guardados_ins += 1
-            except Exception as bd_err:
-                print(f"   ❌ Error guardando insumos de {fecha}: {bd_err}")
                 
-        print(f"   ✅ Se consolidaron y guardaron {guardados_ins} meses de Insumos.")
-        
+                guardados_ins += 1
+                
+            print(f"   ✅ Se procesaron y guardaron {guardados_ins} meses de Insumos.")
+        else:
+            print(f"⚠️ Error al descargar CSV Insumos: HTTP {r_csv.status_code}")
+            
     except Exception as e:
         print(f"❌ Error General en Insumos: {e}")
 
