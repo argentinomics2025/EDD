@@ -18,10 +18,9 @@ TARGETS = [
 ]
 
 def run():
-    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 📉 Iniciando Robot de Bonos...")
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 📉 Iniciando Robot de Bonos (Modo Pizarra)...")
     
     try:
-        # Usamos la API de cotizaciones en vivo
         url = "https://api.argentinadatos.com/v1/cotizaciones/bonos"
         r = requests.get(url, timeout=15)
         
@@ -33,17 +32,13 @@ def run():
                 ticker = bono.get('ticker')
                 precio = bono.get('precio')
                 
-                # Si el bono está en nuestra lista de interés y tiene precio
                 if ticker in TARGETS and precio:
-                    
-                    # Usamos UPSERT: Si el ticker ya existe, le actualiza el precio. Si no, lo crea.
                     supabase.table('historial_bonos').upsert({
                         "ticker": ticker, 
                         "precio": float(precio), 
                         "fecha": datetime.datetime.now().isoformat()
                     }, on_conflict='ticker').execute()
                     
-                    print(f"   ✅ {ticker}: $ {precio:,.2f}")
                     guardados += 1
                     
             print(f"🚀 ¡LISTO! {guardados} bonos actualizados en la Pizarra.")
