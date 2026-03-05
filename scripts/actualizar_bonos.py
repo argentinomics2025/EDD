@@ -31,27 +31,38 @@ def parse_num(texto):
 def get_tir_duration():
     """Llama a la API para traer la TIR y la Duration de los bonos"""
     datos_api = {}
+    print("📡 Intentando conectar con la API de ArgentinaDatos...")
     try:
         r = requests.get("https://api.argentinadatos.com/v1/cotizaciones/bonos", timeout=15)
+        print(f"📡 Respuesta de la API: HTTP {r.status_code}")
+        
         if r.status_code == 200:
-            for b in r.json():
-                ticker = b.get('ticker')
-                if ticker in TARGETS:
-                    # Guardamos TIR y Vencimiento (lo usamos como proxy de Duration por ahora)
-                    datos_api[ticker] = {
-                        "tir": b.get('tir', 0.0),
-                        "duration": b.get('vencimiento', 0.0) # Vencimiento residual en días/años
+            data = r.json()
+            if len(data) > 0:
+                print(f"📡 Se recibieron {len(data)} bonos de la API. Analizando el primero: {data[0]}")
+            
+            for b in data:
+                ticker_api = str(b.get('ticker', '')).upper()
+                
+                # La API a veces devuelve AL30 y nosotros lo necesitamos matchear. 
+                # Si el nuestro es AL30D, quizás la API no tiene la D. Lo guardamos igual por si acaso.
+                if ticker_api:
+                    datos_api[ticker_api] = {
+                        "tir": float(b.get('tir', 0.0) or 0.0),
+                        "duration": str(b.get('vencimiento', '')) 
                     }
     except Exception as e:
-        print(f"⚠️ Aviso: No se pudo cargar la TIR ({e})")
+        print(f"⚠️ Error conectando a la API: {e}")
     return datos_api
 
 def run():
-    print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] 👁️ Iniciando Robot Híbrido (Rava + TIR)...")
+    print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] 👁️ Iniciando Robot Híbrido V2 (Con Debug de API)...")
     
     # 1. Buscamos la data técnica (TIR y Duration)
     data_tecnica = get_tir_duration()
-    print(f"📊 Datos técnicos cargados para {len(data_tecnica)} bonos.")
+    print(f"📊 Diccionario técnico armado con {len(data_tecnica)} bonos.")
+    if "AL30" in data_tecnica:
+        print(f"🔍 Ejemplo de dato guardado en memoria - AL30: {data_tecnica['AL30']}")
     
     # 2. Configuración de Selenium (Rava)
     options = Options()
@@ -85,34 +96,49 @@ def run():
                         var_mes = parse_num(cols[3].text)
                         var_ano = parse_num(cols[4].text)
                         
-                        # Inyectamos la TIR y Duration que trajimos de la API
-                        tir = data_tecnica.get(ticker, {}).get("tir", 0.0)
-                        # Como la API nos da el vencimiento como string de fecha ("2030-07-09"), 
-                        # hacemos un cálculo rápido para sacar la Duration en Años.
-                        vencimiento_str = data_tecnica.get(ticker, {}).get("duration", "")
+                        # --- BÚSQUEDA INTELIGENTE EN EL DICCIONARIO ---
+                        # Si buscamos AL30D pero la API solo nos dio AL30, usamos la TIR del AL30.
+                        ticker_base = ticker.replace('D', '')
+                        
+                        tir = 0.0
                         duration_anios = 0.0
                         
-                        if vencimiento_str and isinstance(vencimiento_str, str):
+                        # Primero buscamos el ticker exacto (ej. AL30D)
+                        if ticker in data_tecnica:
+                            datos_api_bono = data_tecnica[ticker]
+                        # Si no existe, buscamos el base (ej. AL30)
+                        elif ticker_base in data_tecnica:
+                            datos_api_bono = data_tecnica[ticker_base]
+                        else:
+                            datos_api_bono = {"tir": 0.0, "duration": ""}
+
+                        tir = datos_api_bono.get("tir", 0.0)
+                        vencimiento_str = datos_api_bono.get("duration", "")
+                        
+                        if vencimiento_str and isinstance(vencimiento_str, str) and "-" in vencimiento_str:
                             try:
-                                v_date = datetime.datetime.strptime(vencimiento_str, "%Y-%m-%d").date()
+                                v_date = datetime.datetime.strptime(vencimiento_str.split('T')[0], "%Y-%m-%d").date()
                                 hoy = datetime.date.today()
                                 dias_restantes = (v_date - hoy).days
                                 duration_anios = round(dias_restantes / 365.25, 2)
-                            except:
-                                pass
+                            except Exception as e:
+                                print(f"Error procesando fecha para {ticker}: {e}")
                         
                         if precio_final > 0.1:
+                            # Arreglamos el formato de la TIR por si viene como 0.16 en vez de 16
+                            tir_final = tir * 100 if 0 < tir < 1 else tir
+                            
                             datos_finales.append({
                                 "ticker": ticker, 
                                 "precio": precio_final,
                                 "var_dia": var_dia,
                                 "var_mes": var_mes,
                                 "var_ano": var_ano,
-                                "tir": tir * 100 if tir < 2 else tir, # Ajuste si viene en decimal (0.16) o entero (16)
+                                "tir": tir_final,
                                 "duration": duration_anios,
                                 "fecha": datetime.datetime.now(datetime.timezone.utc).isoformat()
                             })
-                            print(f"   ✅ {ticker}: $ {precio_final:,.2f} | TIR: {tir}% | Dur: {duration_anios} años")
+                            print(f"   ✅ {ticker}: $ {precio_final:,.2f} | TIR: {tir_final}% | Dur: {duration_anios} años")
             except Exception as e:
                 continue
         
