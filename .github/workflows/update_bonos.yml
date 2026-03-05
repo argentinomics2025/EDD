@@ -3,8 +3,7 @@ name: 📉 Robot Bonos (Mercado)
 on:
   workflow_dispatch: 
   schedule:
-    # Corre en el minuto 0 de cada hora, entre las 11 y las 17 hs, de Lunes a Viernes
-    - cron: '0 14-20 * * 1-5' 
+    - cron: '0 14-20 * * 1-5' # Corre cada hora entre las 11 y las 17 hs (ARG), de Lunes a Viernes
 
 jobs:
   actualizar-bonos:
