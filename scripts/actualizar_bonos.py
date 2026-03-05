@@ -21,7 +21,6 @@ TARGETS = ['AL29', 'AL30', 'AL35', 'AE38', 'GD29', 'GD30', 'GD35', 'GD38', 'GD41
            'AL29D', 'AL30D', 'AL35D', 'AE38D', 'GD29D', 'GD30D', 'GD35D', 'GD38D', 'GD41D']
 
 # --- MOTOR MATEMÁTICO ---
-# Datos estructurales de los bonos argentinos (Cupón anual, Vencimiento y Duration modificada aprox)
 BONDS_INFO = {
     'AL29': {'mat': '2029-07-09', 'coupon': 8.0, 'dur': 1.8},
     'AL30': {'mat': '2030-07-09', 'coupon': 8.0, 'dur': 2.2},
@@ -50,12 +49,10 @@ def calcular_tir(precio_usd, base_ticker):
     F = 100.0
     P = precio_usd
     
-    # Años restantes hasta el vencimiento
     v_date = datetime.datetime.strptime(info['mat'], "%Y-%m-%d").date()
     hoy = datetime.date.today()
     n = max((v_date - hoy).days / 365.25, 0.1)
     
-    # Fórmula de Wall Street (Approximate YTM)
     approx_ytm = ((C + (F - P) / n) / ((F + P) / 2)) * 100
     return round(max(approx_ytm, 0.0), 2)
 
@@ -82,7 +79,6 @@ def run():
         datos_crudos = []
         precios_usd = {}
         
-        # PASO 1: Leer la tabla y guardar los precios en dólares por separado para la fórmula
         for fila in filas:
             try:
                 cols = fila.find_elements(By.TAG_NAME, "td")
@@ -97,21 +93,22 @@ def run():
                             "var_mes": parse_num(cols[3].text),
                             "var_ano": parse_num(cols[4].text),
                         })
+                        
+                        # EL ARREGLO ESTÁ ACÁ: Cortamos solo la última letra
                         if ticker.endswith('D'):
-                            precios_usd[ticker.replace('D', '')] = precio
+                            precios_usd[ticker[:-1]] = precio
             except:
                 continue
                 
-        # PASO 2: Procesar matemáticamente y armar el paquete final
         datos_finales = []
         for d in datos_crudos:
             ticker = d['ticker']
-            base = ticker.replace('D', '') # AL30D -> AL30
             
-            # Buscamos el precio en USD que le corresponde a este bono
+            # Y ACÁ: Cortamos solo la última letra para saber cuál es el bono base
+            base = ticker[:-1] if ticker.endswith('D') else ticker
+            
             precio_usd_referencia = precios_usd.get(base, 0.0)
             
-            # Inyectamos Inteligencia Financiera
             tir = calcular_tir(precio_usd_referencia, base)
             duration = BONDS_INFO.get(base, {}).get('dur', 0.0)
             
@@ -122,7 +119,6 @@ def run():
             datos_finales.append(d)
             print(f"   ✅ {ticker}: $ {d['precio']:,.2f} | TIR Calculada: {tir}% | Dur: {duration}")
 
-        # PASO 3: Subir a la Base de Datos
         if datos_finales:
             supabase = create_client(URL, KEY)
             supabase.table('historial_bonos').upsert(datos_finales, on_conflict='ticker').execute()
