@@ -1,5 +1,4 @@
 import os
-import datetime
 import requests
 from supabase import create_client
 
@@ -13,22 +12,19 @@ if not URL or not KEY:
 supabase = create_client(URL, KEY)
 
 def run():
-    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 🏗️ Iniciando Robot de Construcción (API Oficial del Gobierno)...")
+    print("🏗️ Iniciando Robot de Construcción (API Oficial del Gobierno)...")
     
     # ==========================================================
     # 1. ACTUALIZAR ACTIVIDAD (ISAC)
     # ==========================================================
     try:
         print("👉 Buscando Índice General de Actividad (ISAC)...")
-        # ID Oficial del Ministerio: 33.2_ISAC_NIVELRAL_0_M_18_63
         url_isac = 'https://apis.datos.gob.ar/series/api/series?ids=33.2_ISAC_NIVELRAL_0_M_18_63&limit=30&format=json'
         r_act = requests.get(url_isac, timeout=20)
         
         if r_act.status_code == 200:
             data = r_act.json()
             filas = data.get('data', [])
-            
-            # La API devuelve [fecha, valor] ordenados del más viejo al más nuevo
             guardados = 0
             
             for i in range(1, len(filas)):
@@ -36,14 +32,13 @@ def run():
                 fecha_actual, val_actual = filas[i]
                 
                 if val_actual and val_previo:
-                    # Calculamos la variación porcentual mes a mes
                     var_mensual = ((val_actual / val_previo) - 1) * 100
                     
+                    # 💡 SIN 'last_updated' para que encaje perfecto con tu tabla actual
                     supabase.table('construccion_actividad').upsert({
                         'fecha': fecha_actual,
                         'indice': round(val_actual, 2),
-                        'variacion_mensual': round(var_mensual, 2),
-                        'last_updated': datetime.datetime.now().isoformat()
+                        'variacion_mensual': round(var_mensual, 2)
                     }, on_conflict='fecha').execute()
                     
                     guardados += 1
@@ -55,66 +50,62 @@ def run():
         print(f"❌ Error en Actividad: {e}")
 
     # ==========================================================
-    # 2. ACTUALIZAR INSUMOS (Desglose Oficial)
+    # 2. ACTUALIZAR INSUMOS (Uno por uno - Antibloqueos)
     # ==========================================================
     try:
         print("👉 Buscando Consumo de Insumos (Materiales)...")
         
-        # IDs Oficiales (Cemento, Asfalto, Hierro, Ladrillos, Hormigon, Pinturas, Pisos, Sanitarios)
-        ids_insumos = '33.3_ISAC_CEMENAND_0_0_21_24,33.3_ISAC_ASFALLTO_0_0_12_6,33.3_ISAC_HIERRION_0_0_49_34,33.3_ISAC_LADRICOS_0_0_24_34,33.3_ISAC_HORMIGDO_0_0_26_38,33.3_ISAC_PINTURAS_0_0_15_18,33.3_ISAC_PISOSCOS_0_0_37_22,33.3_ISAC_ARTICICA_0_0_37_37'
-        url_insumos = f"https://apis.datos.gob.ar/series/api/series?ids={ids_insumos}&limit=30&format=json"
+        # Pedimos uno por uno. Si falla alguno, no rompe el resto.
+        mapeo_insumos = {
+            'cemento_portland': '33.3_ISAC_CEMENAND_0_0_21_24',
+            'asfalto': '33.3_ISAC_ASFALLTO_0_0_12_6',
+            'hierro_redondo': '33.3_ISAC_HIERRION_0_0_49_34',
+            'ladrillos_huecos': '33.3_ISAC_LADRICOS_0_0_24_34',
+            'hormigon_elaborado': '33.3_ISAC_HORMIGDO_0_0_26_38',
+            'pinturas': '33.3_ISAC_PINTURAS_0_0_15_18',
+            'pisos_revestimientos': '33.3_ISAC_PISOSCOS_0_0_37_22',
+            'articulos_sanitarios': '33.3_ISAC_ARTICICA_0_0_37_37'
+        }
         
-        r_ins = requests.get(url_insumos, timeout=20)
+        datos_por_fecha = {}
         
-        if r_ins.status_code == 200:
-            data_ins = r_ins.json()
-            filas_ins = data_ins.get('data', [])
-            guardados_ins = 0
+        for mat, api_id in mapeo_insumos.items():
+            url = f"https://apis.datos.gob.ar/series/api/series?ids={api_id}&limit=30&format=json"
+            r = requests.get(url, timeout=15)
             
-            for i in range(1, len(filas_ins)):
-                fila_previa = filas_ins[i-1]
-                fila_actual = filas_ins[i]
-                
-                fecha = fila_actual[0]
-                
-                # Mapeo según el orden exacto en el que le pedimos los datos al gobierno
-                mapeo = {
-                    'cemento_portland': 1,
-                    'asfalto': 2,
-                    'hierro_redondo': 3,
-                    'ladrillos_huecos': 4,
-                    'hormigon_elaborado': 5,
-                    'pinturas': 6,
-                    'pisos_revestimientos': 7,
-                    'articulos_sanitarios': 8
-                }
-                
-                fila_supabase = {
-                    'fecha': fecha,
-                    'last_updated': datetime.datetime.now().isoformat()
-                }
-                
-                for mat, col_idx in mapeo.items():
-                    val_actual = fila_actual[col_idx]
-                    val_previo = fila_previa[col_idx]
+            if r.status_code == 200:
+                filas = r.json().get('data', [])
+                for i in range(1, len(filas)):
+                    fecha_previa, val_previo = filas[i-1]
+                    fecha_actual, val_actual = filas[i]
+                    
+                    if fecha_actual not in datos_por_fecha:
+                        datos_por_fecha[fecha_actual] = {'fecha': fecha_actual}
                     
                     if val_actual is not None:
-                        fila_supabase[mat] = round(val_actual, 2)
+                        datos_por_fecha[fecha_actual][mat] = round(val_actual, 2)
                         if val_previo:
                             var = ((val_actual / val_previo) - 1) * 100
-                            fila_supabase[f"var_{mat}"] = round(var, 2)
-                
+                            datos_por_fecha[fecha_actual][f"var_{mat}"] = round(var, 2)
+            else:
+                print(f"   ⚠️ Aviso: ID no disponible para '{mat}'. Se saltará.")
+
+        # Guardamos todo lo recolectado en tu tabla de Supabase
+        guardados_ins = 0
+        for fecha, fila_supabase in datos_por_fecha.items():
+            try:
+                # También sin last_updated acá
                 supabase.table('construccion_insumos').upsert(
                     fila_supabase, on_conflict='fecha'
                 ).execute()
-                
                 guardados_ins += 1
+            except Exception as bd_err:
+                print(f"   ❌ Error guardando insumos de {fecha}: {bd_err}")
                 
-            print(f"   ✅ Se procesaron {guardados_ins} meses de Insumos.")
-        else:
-            print(f"⚠️ Error API Gobierno (Insumos): HTTP {r_ins.status_code}")
+        print(f"   ✅ Se consolidaron y guardaron {guardados_ins} meses de Insumos.")
+        
     except Exception as e:
-        print(f"❌ Error en Insumos: {e}")
+        print(f"❌ Error General en Insumos: {e}")
 
     print("🚀 ¡Robot de Construcción completado con éxito!")
 
