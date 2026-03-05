@@ -1,33 +1,31 @@
-name: Actualizar Precios Bonos
+name: 📉 Robot Bonos (Mercado)
 
 on:
+  workflow_dispatch: 
   schedule:
-    # Correr a las 15:30 UTC (12:30 ARG) y 20:30 UTC (17:30 ARG) de Lunes a Viernes
-    - cron: '30 15,20 * * 1-5'
-  workflow_dispatch:
+    # Corre en el minuto 0 de cada hora, entre las 11 y las 17 hs, de Lunes a Viernes
+    - cron: '0 14-20 * * 1-5' 
 
 jobs:
-  scrape-and-update:
+  actualizar-bonos:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Chequear código
-        uses: actions/checkout@v3
+    - name: Descargar el código
+      uses: actions/checkout@v3
 
-      - name: Instalar Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+    - name: Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
 
-      - name: Instalar Chrome
-        uses: browser-actions/setup-chrome@v1
+    - name: Instalar librerías
+      run: |
+        pip install supabase requests
 
-      - name: Instalar Librerías
-        run: |
-          pip install -r requirements.txt
-
-      - name: Correr Script
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python scripts/actualizar_bonos.py
+    - name: Ejecutar Robot
+      env:
+        TZ: 'America/Argentina/Buenos_Aires'
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      run: python scripts/actualizar_bonos.py
