@@ -58,11 +58,11 @@ def run():
                         
                         precio_final = max(p1, p2)
                         
-                        if precio_final > 0.1:
+                      if precio_final > 0.1:
                             datos.append({
                                 "ticker": ticker, 
                                 "precio": precio_final, 
-                                "fecha": datetime.datetime.now().isoformat()
+                                "fecha": datetime.datetime.now(datetime.timezone.utc).isoformat() # <--- LÍNEA CORREGIDA
                             })
                             print(f"   ✅ {ticker}: $ {precio_final:,.2f}")
             except:
