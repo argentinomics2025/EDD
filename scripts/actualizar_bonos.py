@@ -1,7 +1,6 @@
 import os
 import time
 import datetime
-import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -21,50 +20,48 @@ if not URL or not KEY:
 TARGETS = ['AL29', 'AL30', 'AL35', 'AE38', 'GD29', 'GD30', 'GD35', 'GD38', 'GD41',
            'AL29D', 'AL30D', 'AL35D', 'AE38D', 'GD29D', 'GD30D', 'GD35D', 'GD38D', 'GD41D']
 
+# --- MOTOR MATEMÁTICO ---
+# Datos estructurales de los bonos argentinos (Cupón anual, Vencimiento y Duration modificada aprox)
+BONDS_INFO = {
+    'AL29': {'mat': '2029-07-09', 'coupon': 8.0, 'dur': 1.8},
+    'AL30': {'mat': '2030-07-09', 'coupon': 8.0, 'dur': 2.2},
+    'AL35': {'mat': '2035-07-09', 'coupon': 4.125, 'dur': 5.5},
+    'AE38': {'mat': '2038-01-09', 'coupon': 4.25, 'dur': 6.0},
+    'GD29': {'mat': '2029-07-09', 'coupon': 8.0, 'dur': 1.8},
+    'GD30': {'mat': '2030-07-09', 'coupon': 8.0, 'dur': 2.3},
+    'GD35': {'mat': '2035-07-09', 'coupon': 4.125, 'dur': 5.6},
+    'GD38': {'mat': '2038-01-09', 'coupon': 4.25, 'dur': 6.2},
+    'GD41': {'mat': '2041-07-09', 'coupon': 3.5, 'dur': 7.5},
+}
+
 def parse_num(texto):
     try:
-        limpio = texto.replace('$', '').replace('%', '').replace('.', '').replace(',', '.').strip()
-        return float(limpio) if limpio else 0.0
+        return float(texto.replace('$', '').replace('%', '').replace('.', '').replace(',', '.').strip())
     except:
         return 0.0
 
-def get_tir_duration():
-    """Llama a la API para traer la TIR y la Duration de los bonos"""
-    datos_api = {}
-    print("📡 Intentando conectar con la API de ArgentinaDatos...")
-    try:
-        r = requests.get("https://api.argentinadatos.com/v1/cotizaciones/bonos", timeout=15)
-        print(f"📡 Respuesta de la API: HTTP {r.status_code}")
-        
-        if r.status_code == 200:
-            data = r.json()
-            if len(data) > 0:
-                print(f"📡 Se recibieron {len(data)} bonos de la API. Analizando el primero: {data[0]}")
-            
-            for b in data:
-                ticker_api = str(b.get('ticker', '')).upper()
-                
-                # La API a veces devuelve AL30 y nosotros lo necesitamos matchear. 
-                # Si el nuestro es AL30D, quizás la API no tiene la D. Lo guardamos igual por si acaso.
-                if ticker_api:
-                    datos_api[ticker_api] = {
-                        "tir": float(b.get('tir', 0.0) or 0.0),
-                        "duration": str(b.get('vencimiento', '')) 
-                    }
-    except Exception as e:
-        print(f"⚠️ Error conectando a la API: {e}")
-    return datos_api
+def calcular_tir(precio_usd, base_ticker):
+    """Calcula la TIR aproximada basada en el precio en vivo en Dólares"""
+    if base_ticker not in BONDS_INFO or precio_usd <= 0:
+        return 0.0
+    
+    info = BONDS_INFO[base_ticker]
+    C = info['coupon']
+    F = 100.0
+    P = precio_usd
+    
+    # Años restantes hasta el vencimiento
+    v_date = datetime.datetime.strptime(info['mat'], "%Y-%m-%d").date()
+    hoy = datetime.date.today()
+    n = max((v_date - hoy).days / 365.25, 0.1)
+    
+    # Fórmula de Wall Street (Approximate YTM)
+    approx_ytm = ((C + (F - P) / n) / ((F + P) / 2)) * 100
+    return round(max(approx_ytm, 0.0), 2)
 
 def run():
-    print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] 👁️ Iniciando Robot Híbrido V2 (Con Debug de API)...")
+    print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] 👁️ Iniciando Robot Matemático Auténtico...")
     
-    # 1. Buscamos la data técnica (TIR y Duration)
-    data_tecnica = get_tir_duration()
-    print(f"📊 Diccionario técnico armado con {len(data_tecnica)} bonos.")
-    if "AL30" in data_tecnica:
-        print(f"🔍 Ejemplo de dato guardado en memoria - AL30: {data_tecnica['AL30']}")
-    
-    # 2. Configuración de Selenium (Rava)
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
@@ -76,77 +73,61 @@ def run():
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         driver.get("https://www.rava.com/cotizaciones/bonos")
         
-        print("⏳ Esperando carga de precios en Rava...")
+        print("⏳ Extrayendo cotizaciones de Rava...")
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "table")))
         time.sleep(5)
         
-        datos_finales = []
         filas = driver.find_elements(By.TAG_NAME, "tr")
         
+        datos_crudos = []
+        precios_usd = {}
+        
+        # PASO 1: Leer la tabla y guardar los precios en dólares por separado para la fórmula
         for fila in filas:
             try:
                 cols = fila.find_elements(By.TAG_NAME, "td")
-                
                 if len(cols) >= 5:
                     ticker = cols[0].text.strip().upper().replace(" ", "")
-                    
                     if ticker in TARGETS:
-                        precio_final = parse_num(cols[1].text)
-                        var_dia = parse_num(cols[2].text)
-                        var_mes = parse_num(cols[3].text)
-                        var_ano = parse_num(cols[4].text)
-                        
-                        # --- BÚSQUEDA INTELIGENTE EN EL DICCIONARIO ---
-                        # Si buscamos AL30D pero la API solo nos dio AL30, usamos la TIR del AL30.
-                        ticker_base = ticker.replace('D', '')
-                        
-                        tir = 0.0
-                        duration_anios = 0.0
-                        
-                        # Primero buscamos el ticker exacto (ej. AL30D)
-                        if ticker in data_tecnica:
-                            datos_api_bono = data_tecnica[ticker]
-                        # Si no existe, buscamos el base (ej. AL30)
-                        elif ticker_base in data_tecnica:
-                            datos_api_bono = data_tecnica[ticker_base]
-                        else:
-                            datos_api_bono = {"tir": 0.0, "duration": ""}
-
-                        tir = datos_api_bono.get("tir", 0.0)
-                        vencimiento_str = datos_api_bono.get("duration", "")
-                        
-                        if vencimiento_str and isinstance(vencimiento_str, str) and "-" in vencimiento_str:
-                            try:
-                                v_date = datetime.datetime.strptime(vencimiento_str.split('T')[0], "%Y-%m-%d").date()
-                                hoy = datetime.date.today()
-                                dias_restantes = (v_date - hoy).days
-                                duration_anios = round(dias_restantes / 365.25, 2)
-                            except Exception as e:
-                                print(f"Error procesando fecha para {ticker}: {e}")
-                        
-                        if precio_final > 0.1:
-                            # Arreglamos el formato de la TIR por si viene como 0.16 en vez de 16
-                            tir_final = tir * 100 if 0 < tir < 1 else tir
-                            
-                            datos_finales.append({
-                                "ticker": ticker, 
-                                "precio": precio_final,
-                                "var_dia": var_dia,
-                                "var_mes": var_mes,
-                                "var_ano": var_ano,
-                                "tir": tir_final,
-                                "duration": duration_anios,
-                                "fecha": datetime.datetime.now(datetime.timezone.utc).isoformat()
-                            })
-                            print(f"   ✅ {ticker}: $ {precio_final:,.2f} | TIR: {tir_final}% | Dur: {duration_anios} años")
-            except Exception as e:
+                        precio = parse_num(cols[1].text)
+                        datos_crudos.append({
+                            "ticker": ticker,
+                            "precio": precio,
+                            "var_dia": parse_num(cols[2].text),
+                            "var_mes": parse_num(cols[3].text),
+                            "var_ano": parse_num(cols[4].text),
+                        })
+                        if ticker.endswith('D'):
+                            precios_usd[ticker.replace('D', '')] = precio
+            except:
                 continue
-        
+                
+        # PASO 2: Procesar matemáticamente y armar el paquete final
+        datos_finales = []
+        for d in datos_crudos:
+            ticker = d['ticker']
+            base = ticker.replace('D', '') # AL30D -> AL30
+            
+            # Buscamos el precio en USD que le corresponde a este bono
+            precio_usd_referencia = precios_usd.get(base, 0.0)
+            
+            # Inyectamos Inteligencia Financiera
+            tir = calcular_tir(precio_usd_referencia, base)
+            duration = BONDS_INFO.get(base, {}).get('dur', 0.0)
+            
+            d['tir'] = tir
+            d['duration'] = duration
+            d['fecha'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            
+            datos_finales.append(d)
+            print(f"   ✅ {ticker}: $ {d['precio']:,.2f} | TIR Calculada: {tir}% | Dur: {duration}")
+
+        # PASO 3: Subir a la Base de Datos
         if datos_finales:
             supabase = create_client(URL, KEY)
             supabase.table('historial_bonos').upsert(datos_finales, on_conflict='ticker').execute()
-            print(f"\n🚀 ¡LISTO! {len(datos_finales)} bonos guardados con Curva Yield.")
-        
+            print(f"\n🚀 ¡LISTO! {len(datos_finales)} bonos guardados con el motor matemático.")
+            
         driver.quit()
 
     except Exception as e:
