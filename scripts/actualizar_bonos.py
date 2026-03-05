@@ -1,6 +1,7 @@
 import os
 import time
 import datetime
+import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -10,7 +11,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from supabase import create_client
 
-# --- LEER CREDENCIALES ---
+# --- CREDENCIALES ---
 URL = os.environ.get("SUPABASE_URL")
 KEY = os.environ.get("SUPABASE_KEY")
 
@@ -20,16 +21,39 @@ if not URL or not KEY:
 TARGETS = ['AL29', 'AL30', 'AL35', 'AE38', 'GD29', 'GD30', 'GD35', 'GD38', 'GD41',
            'AL29D', 'AL30D', 'AL35D', 'AE38D', 'GD29D', 'GD30D', 'GD35D', 'GD38D', 'GD41D']
 
-def parse_var(texto):
+def parse_num(texto):
     try:
-        limpio = texto.replace('%', '').replace(',', '.').strip()
+        limpio = texto.replace('$', '').replace('%', '').replace('.', '').replace(',', '.').strip()
         return float(limpio) if limpio else 0.0
     except:
         return 0.0
 
+def get_tir_duration():
+    """Llama a la API para traer la TIR y la Duration de los bonos"""
+    datos_api = {}
+    try:
+        r = requests.get("https://api.argentinadatos.com/v1/cotizaciones/bonos", timeout=15)
+        if r.status_code == 200:
+            for b in r.json():
+                ticker = b.get('ticker')
+                if ticker in TARGETS:
+                    # Guardamos TIR y Vencimiento (lo usamos como proxy de Duration por ahora)
+                    datos_api[ticker] = {
+                        "tir": b.get('tir', 0.0),
+                        "duration": b.get('vencimiento', 0.0) # Vencimiento residual en días/años
+                    }
+    except Exception as e:
+        print(f"⚠️ Aviso: No se pudo cargar la TIR ({e})")
+    return datos_api
+
 def run():
-    print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] 👁️ Iniciando Robot Inteligente de Bonos...")
+    print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] 👁️ Iniciando Robot Híbrido (Rava + TIR)...")
     
+    # 1. Buscamos la data técnica (TIR y Duration)
+    data_tecnica = get_tir_duration()
+    print(f"📊 Datos técnicos cargados para {len(data_tecnica)} bonos.")
+    
+    # 2. Configuración de Selenium (Rava)
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
@@ -45,66 +69,57 @@ def run():
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "table")))
         time.sleep(5)
         
-        table = driver.find_element(By.TAG_NAME, "table")
-        
-        # 1. MAPEAR CABECERAS (El robot aprende a leer la tabla)
-        headers = table.find_elements(By.TAG_NAME, "th")
-        titulos = [h.text.strip().lower() for h in headers]
-        print(f"📊 Títulos detectados: {titulos}")
-        
-        # Buscamos los índices de las columnas por su nombre real
-        idx_ultimo = 1
-        idx_dia = 3
-        idx_mes = -1
-        idx_ano = -1
-        
-        for i, t in enumerate(titulos):
-            if 'último' in t or 'ultimo' in t: idx_ultimo = i
-            elif 'var' in t or 'día' in t or 'dia' in t: idx_dia = i
-            elif 'mes' in t: idx_mes = i
-            elif 'año' in t or 'ano' in t: idx_ano = i
-
-        datos = []
-        filas = table.find_elements(By.TAG_NAME, "tr")
+        datos_finales = []
+        filas = driver.find_elements(By.TAG_NAME, "tr")
         
         for fila in filas:
             try:
                 cols = fila.find_elements(By.TAG_NAME, "td")
-                if len(cols) > max(idx_ultimo, idx_dia):
+                
+                if len(cols) >= 5:
                     ticker = cols[0].text.strip().upper().replace(" ", "")
                     
                     if ticker in TARGETS:
-                        # MODO DEBUG: Ver los datos crudos del bono conflictivo
-                        if ticker == 'GD41D':
-                            textos_fila = [c.text.strip() for c in cols]
-                            print(f"🕵️ Fila cruda de {ticker}: {textos_fila}")
-
-                        # Extracción usando los índices inteligentes
-                        txt_ultimo = cols[idx_ultimo].text.replace('$', '').replace('.', '').replace(',', '.')
-                        precio_final = float(txt_ultimo) if txt_ultimo.replace('.','').isdigit() else 0.0
+                        precio_final = parse_num(cols[1].text)
+                        var_dia = parse_num(cols[2].text)
+                        var_mes = parse_num(cols[3].text)
+                        var_ano = parse_num(cols[4].text)
                         
-                        var_dia = parse_var(cols[idx_dia].text)
+                        # Inyectamos la TIR y Duration que trajimos de la API
+                        tir = data_tecnica.get(ticker, {}).get("tir", 0.0)
+                        # Como la API nos da el vencimiento como string de fecha ("2030-07-09"), 
+                        # hacemos un cálculo rápido para sacar la Duration en Años.
+                        vencimiento_str = data_tecnica.get(ticker, {}).get("duration", "")
+                        duration_anios = 0.0
                         
-                        # Si la tabla tiene Mes y Año, los lee. Si no, manda 0 para no guardar basura.
-                        var_mes = parse_var(cols[idx_mes].text) if idx_mes != -1 else 0.0
-                        var_ano = parse_var(cols[idx_ano].text) if idx_ano != -1 else 0.0
+                        if vencimiento_str and isinstance(vencimiento_str, str):
+                            try:
+                                v_date = datetime.datetime.strptime(vencimiento_str, "%Y-%m-%d").date()
+                                hoy = datetime.date.today()
+                                dias_restantes = (v_date - hoy).days
+                                duration_anios = round(dias_restantes / 365.25, 2)
+                            except:
+                                pass
                         
                         if precio_final > 0.1:
-                            datos.append({
+                            datos_finales.append({
                                 "ticker": ticker, 
                                 "precio": precio_final,
                                 "var_dia": var_dia,
                                 "var_mes": var_mes,
                                 "var_ano": var_ano,
+                                "tir": tir * 100 if tir < 2 else tir, # Ajuste si viene en decimal (0.16) o entero (16)
+                                "duration": duration_anios,
                                 "fecha": datetime.datetime.now(datetime.timezone.utc).isoformat()
                             })
+                            print(f"   ✅ {ticker}: $ {precio_final:,.2f} | TIR: {tir}% | Dur: {duration_anios} años")
             except Exception as e:
                 continue
         
-        if datos:
+        if datos_finales:
             supabase = create_client(URL, KEY)
-            supabase.table('historial_bonos').upsert(datos, on_conflict='ticker').execute()
-            print(f"\n🚀 ¡LISTO! {len(datos)} bonos guardados.")
+            supabase.table('historial_bonos').upsert(datos_finales, on_conflict='ticker').execute()
+            print(f"\n🚀 ¡LISTO! {len(datos_finales)} bonos guardados con Curva Yield.")
         
         driver.quit()
 
