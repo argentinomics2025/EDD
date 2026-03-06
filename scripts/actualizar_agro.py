@@ -1,14 +1,7 @@
 import os
-import time
+import re
 import datetime
 import requests
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 from supabase import create_client
 
 # --- LEER CREDENCIALES ---
@@ -30,96 +23,82 @@ def obtener_dolar_mayorista():
         pass
     return 1050.0
 
-def parse_precio(texto):
-    """Limpia el precio de la Cámara (Ej: '305.000,00' -> 305000.0)"""
-    try:
-        return float(texto.replace('$', '').replace('.', '').replace(',', '.').strip())
-    except:
-        return 0.0
+def buscar_precio(texto, cultivo):
+    """Tu técnica ninja original: Busca la palabra clave y atrapa el número siguiente"""
+    # Regex: Busca el cultivo, luego hasta 150 caracteres, el signo $ opcional, y el número.
+    patron = rf"{cultivo}.{{0,150}}?\$?\s*([0-9]{{1,3}}(?:\.[0-9]{{3}})*(?:,[0-9]+)?)"
+    match = re.search(patron, texto, re.IGNORECASE)
+    
+    if match:
+        # Limpiamos el número (sacamos puntos y cambiamos coma por punto decimal)
+        numero_limpio = match.group(1).replace('.', '').replace(',', '.')
+        try:
+            return float(numero_limpio)
+        except:
+            return 0.0
+    return 0.0
 
 def run():
-    print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] 🚜 Iniciando Robot Agropecuario (Rosario)...")
+    print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] 🚜 Iniciando Robot Agropecuario (Modo Ninja)...")
     
     dolar_usd = obtener_dolar_mayorista()
     print(f"💵 Dólar Mayorista de referencia: $ {dolar_usd}")
     
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    # Nos hacemos pasar por un humano normal
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Cache-Control': 'no-cache'
+    }
     
     try:
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        print("⏳ Obteniendo datos oficiales de la Cámara Arbitral...")
+        respuesta = requests.get('https://www.cac.bcr.com.ar/es/precios-de-pizarra', headers=headers, timeout=20)
+        respuesta.raise_for_status() # Lanza error si la página está caída
         
-        # Página Oficial de la Cámara Arbitral de Cereales de Rosario
-        driver.get("https://www.cac.bcr.com.ar/es/precios-de-pizarra")
-        print("⏳ Esperando tabla de la Cámara Arbitral...")
+        # 1. Limpieza extrema del HTML (Convertimos la web en puro texto plano)
+        html_crudo = respuesta.text
+        texto_sin_tags = re.sub(r'<[^>]+>', ' ', html_crudo)
+        texto_limpio = re.sub(r'\s+', ' ', texto_sin_tags).strip()
         
-        # Buscamos las filas de la tabla de precios
-        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr")))
-        time.sleep(3)
+        # 2. Búsqueda de precios
+        precios = {
+            'soja': buscar_precio(texto_limpio, 'Soja'),
+            'maiz': buscar_precio(texto_limpio, 'Maíz') or buscar_precio(texto_limpio, 'Maiz'),
+            'trigo': buscar_precio(texto_limpio, 'Trigo'),
+            'girasol': buscar_precio(texto_limpio, 'Girasol')
+        }
         
-        filas = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
-        
+        if precios['soja'] == 0:
+            print("⚠️ No encontré el precio de la soja. ¿La Cámara todavía no publicó la pizarra de hoy?")
+            return
+            
+        # 3. Guardar en Base de Datos
         hoy = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
         datos_guardar = []
         
-        # Diccionario de equivalencias de la página oficial
-        granos_validos = {
-            'SOJA': 'soja',
-            'MAÍZ': 'maiz',
-            'TRIGO': 'trigo',
-            'GIRASOL': 'girasol'
-        }
-        
-        for fila in filas:
-            cols = fila.find_elements(By.TAG_NAME, "td")
-            if len(cols) >= 2:
-                nombre_crudo = cols[0].text.strip().upper()
+        for grano, precio_ars in precios.items():
+            if precio_ars > 1000: # Evitar ceros o datos corruptos
+                precio_usd = round(precio_ars / dolar_usd, 2)
                 
-                # Buscamos si la palabra SOJA, MAIZ, etc. está en la celda
-                for key, valor_bd in granos_validos.items():
-                    if key in nombre_crudo:
-                        precio_ars = parse_precio(cols[1].text)
-                        
-                        if precio_ars > 1000: # Validación para no guardar precios en cero
-                            precio_usd = round(precio_ars / dolar_usd, 2)
-                            
-                            # Insertamos en Pesos
-                            datos_guardar.append({
-                                "fecha": hoy,
-                                "grano": valor_bd,
-                                "mercado": "rosario",
-                                "precio": precio_ars
-                            })
-                            
-                            # Insertamos en Dólares
-                            datos_guardar.append({
-                                "fecha": hoy,
-                                "grano": valor_bd,
-                                "mercado": "rosario_usd",
-                                "precio": precio_usd
-                            })
-                            print(f"   🌾 {key}: $ {precio_ars:,.2f} | u$s {precio_usd:,.2f}")
-                        break # Si encontró el grano, salta a la siguiente fila
-
-        driver.quit()
-
-        # Guardar en Base de Datos
+                # Paquete Pesos
+                datos_guardar.append({"fecha": hoy, "grano": grano, "mercado": "rosario", "precio": precio_ars})
+                # Paquete Dólares
+                datos_guardar.append({"fecha": hoy, "grano": grano, "mercado": "rosario_usd", "precio": precio_usd})
+                
+                print(f"   🌾 {grano.upper()}: $ {precio_ars:,.2f} | u$s {precio_usd:,.2f}")
+        
         if datos_guardar:
-            # Primero borramos los datos de hoy por si el robot corre dos veces, para no duplicar (Upsert manual)
+            # Borramos el registro del día para no duplicar si corre 5 veces hoy
             supabase.table('datos_agro').delete().eq('fecha', hoy).in_('mercado', ['rosario', 'rosario_usd']).execute()
             
-            # Insertamos la tanda fresca
+            # Insertamos la información nueva
             supabase.table('datos_agro').insert(datos_guardar).execute()
             print(f"\n🚀 ¡COSECHA TERMINADA! {len(datos_guardar)} registros guardados en Supabase.")
-        else:
-            print("⚠️ No se encontraron precios en la tabla hoy.")
-
+            
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error de conexión con la Cámara de Rosario: {e}")
     except Exception as e:
-        print(f"❌ Error en el campo: {e}")
+        print(f"❌ Error general en el campo: {e}")
 
 if __name__ == "__main__":
     run()
