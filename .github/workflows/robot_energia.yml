@@ -1,0 +1,25 @@
+name: 🛢️ Robot Energía (Wall Street)
+
+on:
+  workflow_dispatch: 
+  schedule:
+    # Corre una vez por hora de 10 a 17 hs (ARG) (En UTC: 13 a 20)
+    - cron: '15 13-20 * * 1-5' 
+
+jobs:
+  actualizar-energia:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Descargar el código
+      uses: actions/checkout@v4
+    - name: Configurar Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    - name: Instalar librerías
+      run: pip install supabase requests
+    - name: Arrancar Perforadora 🛢️
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      run: python scripts/actualizar_energia.py
