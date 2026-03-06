@@ -1,0 +1,13 @@
+name: 🚜 Robot Agropecuario (Rosario)
+
+on:
+  workflow_dispatch: 
+  schedule:
+    # Corre una vez por hora, desde las 11:00 hasta las 17:00 (ARG), de Lunes a Viernes
+    # (En horario UTC: de 14:00 a 20:00)
+    - cron: '0 14-20 * * 1-5' 
+
+jobs:
+  actualizar-agro:
+    runs-on: ubuntu-latest
+# ... (el resto del archivo sigue igual) ...
