@@ -3,11 +3,37 @@ name: 🚜 Robot Agropecuario (Rosario)
 on:
   workflow_dispatch: 
   schedule:
-    # Corre una vez por hora, desde las 11:00 hasta las 17:00 (ARG), de Lunes a Viernes
-    # (En horario UTC: de 14:00 a 20:00)
+    # Corre una vez por hora, desde las 11:00 hasta las 17:00 hs (ARG), de Lunes a Viernes
+    # (El reloj de GitHub usa UTC, por eso de 14:00 a 20:00)
     - cron: '0 14-20 * * 1-5' 
 
 jobs:
   actualizar-agro:
     runs-on: ubuntu-latest
-# ... (el resto del archivo sigue igual) ...
+
+    steps:
+    - name: Descargar el código
+      uses: actions/checkout@v4
+
+    - name: Configurar Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Instalar Google Chrome (Para Selenium)
+      run: |
+        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable
+
+    - name: Instalar librerías
+      run: |
+        pip install supabase requests selenium webdriver-manager
+
+    - name: Arrancar Tractor 🚜
+      env:
+        TZ: 'America/Argentina/Buenos_Aires'
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      run: python scripts/actualizar_agro.py
