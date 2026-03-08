@@ -1,5 +1,7 @@
 import os
 import pandas as pd
+import requests
+from io import StringIO
 from supabase import create_client, Client
 
 def actualizar_comex():
@@ -33,11 +35,24 @@ def actualizar_comex():
             "74.3_IIVAPG_0_M_39"# Impo VA (Vehículos)
         ]
 
-        # 3. Descargamos el CSV directo de la API
         api_url = f"https://apis.datos.gob.ar/series/api/series/?ids={','.join(series_ids)}&limit=5000&format=csv"
-        df = pd.read_csv(api_url)
+        
+        # 3. EL DISFRAZ (User-Agent): Nos hacemos pasar por un navegador normal
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        }
+        
+        print("📡 Conectando a la API del gobierno...")
+        response = requests.get(api_url, headers=headers)
+        
+        # Si el servidor igual nos patea, que nos diga exactamente por qué
+        response.raise_for_status() 
 
-        # 4. Mapeamos exactamente a las columnas de nuestra tabla SQL
+        # 4. Leemos el texto de la respuesta y se lo pasamos a Pandas
+        df = pd.read_csv(StringIO(response.text))
+
+        # 5. Mapeamos exactamente a las columnas de nuestra tabla SQL
         df.columns = [
             'fecha', 
             'exportaciones_usd_millions', 'importaciones_usd_millions', 'saldo_usd_millions',
@@ -50,9 +65,9 @@ def actualizar_comex():
         df = df.fillna(0)
         records = df.to_dict(orient='records')
 
-        print(f"📊 [BOT COMEX] Se encontraron {len(records)} meses. Subiendo a Supabase...")
+        print(f"📊 [BOT COMEX] Se descargaron {len(records)} meses. Subiendo a Supabase...")
 
-        # 5. Inyectamos en Supabase (Usamos UPSERT)
+        # 6. Inyectamos en Supabase (Usamos UPSERT)
         for record in records:
             for key, value in record.items():
                 if key != 'fecha':
