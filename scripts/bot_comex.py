@@ -35,7 +35,8 @@ def actualizar_comex():
             "74.3_IIVAPG_0_M_39"# Impo VA (Vehículos)
         ]
 
-        api_url = f"https://apis.datos.gob.ar/series/api/series/?ids={','.join(series_ids)}&limit=5000&format=csv"
+        # EL ARREGLO ESTÁ ACÁ: Cambiamos limit=5000 por limit=1000
+        api_url = f"https://apis.datos.gob.ar/series/api/series/?ids={','.join(series_ids)}&limit=1000&format=csv"
         
         # 3. EL DISFRAZ (User-Agent): Nos hacemos pasar por un navegador normal
         headers = {
