@@ -25,4 +25,5 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python bot_comex.py
+        # ACÁ ESTÁ LA MAGIA: Le sumamos "scripts/" a la ruta
+        run: python scripts/bot_comex.py
