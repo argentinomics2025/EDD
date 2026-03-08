@@ -1,11 +1,9 @@
 import os
 import pandas as pd
-import requests
-from io import StringIO
 from supabase import create_client, Client
 
 def actualizar_comex():
-    print("🚢 [BOT COMEX] Iniciando escaneo del INDEC...")
+    print("🚢 [BOT COMEX] Iniciando descarga desde el servidor central del INDEC...")
     
     # 1. Traemos las credenciales
     SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -17,72 +15,49 @@ def actualizar_comex():
 
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     
-    # 2. El mapa exacto de códigos vs nombres de columnas en tu base
-    series_map = {
-        "74.3_IEG_0_M_18": "exportaciones_usd_millions",
-        "74.3_IIG_0_M_18": "importaciones_usd_millions",
-        "74.3_ISG_0_M_15": "saldo_usd_millions",
-        "74.3_IPPG_0_M_28": "expo_primarios",
-        "74.3_IMAG_0_M_37": "expo_moa",
-        "74.3_IMIG_0_M_36": "expo_moi",
-        "74.3_ICEG_0_M_32": "expo_energia",
-        "74.3_IIBKG_0_M_26": "impo_bienes_capital",
-        "74.3_IIBIG_0_M_27": "impo_bienes_intermedios",
-        "74.3_IICLG_0_M_36": "impo_combustibles",
-        "74.3_IIPAG_0_M_46": "impo_piezas_accesorios",
-        "74.3_IIBCG_0_M_27": "impo_bienes_consumo",
-        "74.3_IIVAPG_0_M_39": "impo_vehiculos"
-    }
+    try:
+        # 2. EL ATAJO: Vamos directo al archivo CSV maestro del gobierno (no a la API)
+        csv_url = "https://infra.datos.gob.ar/catalog/sspm/dataset/74/distribution/74.3/download/intercambio-comercial-argentino-base-1990.csv"
+        
+        print("📡 Descargando historial completo (1990 - Hoy)...")
+        # Pandas lee el CSV directamente desde la web
+        df = pd.read_csv(csv_url)
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
-    }
-    
-    df_final = pd.DataFrame()
+        # 3. Nos quedamos solo con las columnas que nos importan y las renombramos
+        columnas_oficiales = {
+            'indice_tiempo': 'fecha',
+            'exportaciones_totales': 'exportaciones_usd_millions',
+            'importaciones_totales': 'importaciones_usd_millions',
+            'saldo': 'saldo_usd_millions',
+            'exportaciones_productos_primarios': 'expo_primarios',
+            'exportaciones_moa': 'expo_moa',
+            'exportaciones_moi': 'expo_moi',
+            'exportaciones_combustibles_energia': 'expo_energia',
+            'importaciones_bienes_capital': 'impo_bienes_capital',
+            'importaciones_bienes_intermedios': 'impo_bienes_intermedios',
+            'importaciones_combustibles_lubricantes': 'impo_combustibles',
+            'importaciones_piezas_accesorios': 'impo_piezas_accesorios',
+            'importaciones_bienes_consumo': 'impo_bienes_consumo',
+            'importaciones_vehiculos_automotores': 'impo_vehiculos'
+        }
+        
+        # Filtramos y renombramos en un solo paso
+        df = df[list(columnas_oficiales.keys())].rename(columns=columnas_oficiales)
 
-    # 3. Consultamos UNO POR UNO. Si uno falla, no arrastra al resto.
-    for series_id, col_name in series_map.items():
-        url = f"https://apis.datos.gob.ar/series/api/series/?ids={series_id}&limit=1000&format=csv"
-        try:
-            print(f"📡 Descargando: {col_name}...")
-            res = requests.get(url, headers=headers)
-            res.raise_for_status()  # Si hay error 400, salta al "except"
-            
-            df_temp = pd.read_csv(StringIO(res.text))
-            
-            # La API siempre devuelve 'indice_tiempo' y el valor. Lo renombramos.
-            df_temp.columns = ['fecha', col_name]
-            
-            if df_final.empty:
-                df_final = df_temp
-            else:
-                # Vamos "pegando" las columnas nuevas usando la fecha
-                df_final = pd.merge(df_final, df_temp, on='fecha', how='outer')
-                
-        except Exception as e:
-            # ¡Acá está la trampa! Atrapamos al código roto y seguimos adelante.
-            print(f"⚠️ AVISO: No se encontró la serie '{col_name}'. El INDEC puede haber cambiado el ID.")
+        # 4. Limpiamos los datos
+        df = df.fillna(0) # Cambiamos vacíos por 0
+        records = df.to_dict(orient='records')
 
-    if df_final.empty:
-        print("❌ [BOT COMEX] Error crítico: No se pudo descargar ningún dato de la API.")
-        return
+        print(f"📊 [BOT COMEX] Se procesaron {len(records)} meses correctamente.")
+        print("🚀 Subiendo todos los datos a Supabase de un solo golpe...")
 
-    # 4. Rellenamos huecos con 0 para no romper la base de datos
-    df_final = df_final.fillna(0)
-    records = df_final.to_dict(orient='records')
+        # 5. INYECCIÓN MASIVA: En lugar de subir de a 1, subimos toda la lista junta
+        response = supabase.table('datos_comex').upsert(records).execute()
 
-    print(f"🔗 [BOT COMEX] Consolidación exitosa. Se armó un historial de {len(records)} meses.")
-    print("⏳ Subiendo a Supabase...")
+        print("✅ [BOT COMEX] ¡Misión cumplida! Toda la balanza comercial está en tu base de datos.")
 
-    # 5. Inyectamos en Supabase (Usamos UPSERT)
-    for record in records:
-        for key, value in record.items():
-            if key != 'fecha':
-                record[key] = float(value)
-                
-        supabase.table('datos_comex').upsert(record).execute()
-
-    print("✅ [BOT COMEX] ¡Misión cumplida! Base de datos de Comercio Exterior actualizada.")
+    except Exception as e:
+        print(f"❌ [BOT COMEX] Error crítico: {e}")
 
 if __name__ == "__main__":
     actualizar_comex()
