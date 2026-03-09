@@ -11,52 +11,43 @@ def actualizar_comex():
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
     
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("❌ Error: Faltan credenciales de Supabase en las variables de entorno.")
+        print("❌ Error: Faltan credenciales.")
         return
 
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     
     try:
         csv_url = "https://infra.datos.gob.ar/catalog/sspm/dataset/74/distribution/74.3/download/intercambio-comercial-argentino-mensual.csv"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"}
         
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/csv,application/csv,text/html,*/*"
+        res = requests.get(csv_url, headers=headers)
+        res.raise_for_status() 
+        df = pd.read_csv(StringIO(res.text))
+
+        # MAPEO ESTRICTO EXACTO: Sin adivinar columnas.
+        mapeo_oficial = {
+            'indice_tiempo': 'fecha',
+            'exportaciones_totales': 'exportaciones_usd_millions',
+            'importaciones_totales': 'importaciones_usd_millions',
+            'saldo': 'saldo_usd_millions',
+            'exportaciones_productos_primarios': 'expo_primarios',
+            'exportaciones_moa': 'expo_moa',
+            'exportaciones_moi': 'expo_moi',
+            'exportaciones_combustibles_energia': 'expo_energia',
+            'importaciones_bienes_capital': 'impo_bienes_capital',
+            'importaciones_bienes_intermedios': 'impo_bienes_intermedios',
+            'importaciones_combustibles_lubricantes': 'impo_combustibles',
+            'importaciones_piezas_accesorios': 'impo_piezas_accesorios',
+            'importaciones_bienes_consumo': 'impo_bienes_consumo',
+            'importaciones_vehiculos_automotores': 'impo_vehiculos'
         }
-        
-        print("📡 Conectando y descargando historial completo (1990 - Hoy)...")
-        response = requests.get(csv_url, headers=headers)
-        response.raise_for_status() 
-        
-        df = pd.read_csv(StringIO(response.text))
 
-        mapeo_columnas = {}
-        for col in df.columns:
-            c = col.lower()
-            if 'desestacionalizado' in c or 'tendencia' in c:
-                continue
-            
-            if 'indice' in c or 'fecha' in c: mapeo_columnas[col] = 'fecha'
-            elif 'saldo' in c: mapeo_columnas[col] = 'saldo_usd_millions'
-            elif 'export' in c and 'total' in c: mapeo_columnas[col] = 'exportaciones_usd_millions'
-            elif 'import' in c and 'total' in c: mapeo_columnas[col] = 'importaciones_usd_millions'
-            elif 'primario' in c: mapeo_columnas[col] = 'expo_primarios'
-            elif 'agropecuario' in c or 'moa' in c: mapeo_columnas[col] = 'expo_moa'
-            elif 'industrial' in c or 'moi' in c: mapeo_columnas[col] = 'expo_moi'
-            elif ('energia' in c or 'combustible' in c) and 'export' in c: mapeo_columnas[col] = 'expo_energia'
-            elif 'capital' in c: mapeo_columnas[col] = 'impo_bienes_capital'
-            elif 'intermedio' in c: mapeo_columnas[col] = 'impo_bienes_intermedios'
-            elif 'combustible' in c and 'import' in c: mapeo_columnas[col] = 'impo_combustibles'
-            elif 'pieza' in c or 'accesorio' in c: mapeo_columnas[col] = 'impo_piezas_accesorios'
-            elif 'consumo' in c: mapeo_columnas[col] = 'impo_bienes_consumo'
-            elif 'vehiculo' in c or 'automotor' in c: mapeo_columnas[col] = 'impo_vehiculos'
-
-        df = df[list(mapeo_columnas.keys())].rename(columns=mapeo_columnas)
+        # Renombramos usando solo las columnas que hacen match perfecto
+        columnas_existentes = {k: v for k, v in mapeo_oficial.items() if k in df.columns}
+        df = df[list(columnas_existentes.keys())].rename(columns=columnas_existentes)
+        
         df = df.fillna(0)
-        
-        # Formateamos bien la fecha para que a Supabase le guste
         df['fecha'] = pd.to_datetime(df['fecha']).dt.strftime('%Y-%m-%d')
-        
         records_historicos = df.to_dict(orient='records')
 
         datos_recientes = [
@@ -82,9 +73,6 @@ def actualizar_comex():
             {'fecha': '2026-02-01', 'exportaciones_usd_millions': 7150, 'importaciones_usd_millions': 5120, 'saldo_usd_millions': 2030, 'expo_primarios': 1250, 'expo_moa': 2550, 'expo_moi': 1650, 'expo_energia': 1700, 'impo_bienes_capital': 880, 'impo_bienes_intermedios': 1880, 'impo_combustibles': 240, 'impo_piezas_accesorios': 1020, 'impo_bienes_consumo': 580, 'impo_vehiculos': 520}
         ]
 
-        # ELIMINADOR DE DUPLICADOS EN PYTHON:
-        # Clavamos todo en un diccionario usando 'fecha' como ID. 
-        # Los datos manuales pisan los viejos del INDEC si la fecha es igual.
         datos_dict = {}
         for r in records_historicos:
             datos_dict[r['fecha']] = r
@@ -92,19 +80,16 @@ def actualizar_comex():
             datos_dict[r['fecha']] = r
             
         records_finales = list(datos_dict.values())
+        print("🚀 Subiendo datos corregidos a Supabase...")
 
-        print(f"📊 [BOT COMEX] Se identificaron y mapearon {len(mapeo_columnas)} columnas clave.")
-        print(f"🚀 Subiendo todo el historial ({len(records_finales)} meses) a Supabase...")
-
-        # LA SOLUCIÓN DE CONFLICTO: Le sumamos "on_conflict='fecha'" a la inyección
         for i in range(0, len(records_finales), 500):
             lote = records_finales[i:i+500]
             supabase.table('datos_comex').upsert(lote, on_conflict='fecha').execute()
 
-        print("✅ [BOT COMEX] ¡Misión cumplida! Base de datos de Comercio Exterior 100% lista y detallada.")
+        print("✅ [BOT COMEX] Base de datos curada y lista para graficar.")
 
     except Exception as e:
-        print(f"❌ [BOT COMEX] Error crítico: {e}")
+        print(f"❌ Error crítico: {e}")
 
 if __name__ == "__main__":
     actualizar_comex()
