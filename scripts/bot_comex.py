@@ -5,7 +5,7 @@ from io import StringIO
 from supabase import create_client, Client
 
 def actualizar_comex():
-    print("🚢 [BOT COMEX] Iniciando descarga desde el servidor central del INDEC...")
+    print("🚢 [BOT COMEX] Restaurando historial profundo desde el INDEC...")
     
     SUPABASE_URL = os.environ.get("SUPABASE_URL")
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
@@ -24,27 +24,31 @@ def actualizar_comex():
         res.raise_for_status() 
         df = pd.read_csv(StringIO(res.text))
 
-        # MAPEO ESTRICTO EXACTO: Sin adivinar columnas.
+        # MAPEO EXACTO Y LITERAL DE LAS COLUMNAS KILOMÉTRICAS DEL GOBIERNO
         mapeo_oficial = {
             'indice_tiempo': 'fecha',
             'exportaciones_totales': 'exportaciones_usd_millions',
             'importaciones_totales': 'importaciones_usd_millions',
             'saldo': 'saldo_usd_millions',
             'exportaciones_productos_primarios': 'expo_primarios',
-            'exportaciones_moa': 'expo_moa',
-            'exportaciones_moi': 'expo_moi',
+            'exportaciones_manufacturas_origen_agropecuario': 'expo_moa',
+            'exportaciones_manufacturas_origen_industrial': 'expo_moi',
             'exportaciones_combustibles_energia': 'expo_energia',
             'importaciones_bienes_capital': 'impo_bienes_capital',
             'importaciones_bienes_intermedios': 'impo_bienes_intermedios',
             'importaciones_combustibles_lubricantes': 'impo_combustibles',
-            'importaciones_piezas_accesorios': 'impo_piezas_accesorios',
+            'importaciones_piezas_accesorios_bienes_capital': 'impo_piezas_accesorios',
             'importaciones_bienes_consumo': 'impo_bienes_consumo',
-            'importaciones_vehiculos_automotores': 'impo_vehiculos'
+            'importaciones_vehiculos_automotores_pasajeros': 'impo_vehiculos'
         }
 
-        # Renombramos usando solo las columnas que hacen match perfecto
-        columnas_existentes = {k: v for k, v in mapeo_oficial.items() if k in df.columns}
-        df = df[list(columnas_existentes.keys())].rename(columns=columnas_existentes)
+        # Renombramos y filtramos SOLO las columnas que necesitamos
+        df = df.rename(columns=mapeo_oficial)
+        columnas_finales = list(mapeo_oficial.values())
+        
+        # Nos aseguramos de que existan antes de filtrar (para evitar errores)
+        columnas_existentes = [c for c in columnas_finales if c in df.columns]
+        df = df[columnas_existentes]
         
         df = df.fillna(0)
         df['fecha'] = pd.to_datetime(df['fecha']).dt.strftime('%Y-%m-%d')
@@ -80,13 +84,13 @@ def actualizar_comex():
             datos_dict[r['fecha']] = r
             
         records_finales = list(datos_dict.values())
-        print("🚀 Subiendo datos corregidos a Supabase...")
+        print(f"🚀 Restaurando {len(records_finales)} meses en Supabase...")
 
         for i in range(0, len(records_finales), 500):
             lote = records_finales[i:i+500]
             supabase.table('datos_comex').upsert(lote, on_conflict='fecha').execute()
 
-        print("✅ [BOT COMEX] Base de datos curada y lista para graficar.")
+        print("✅ [BOT COMEX] Base de datos restaurada y 100% curada.")
 
     except Exception as e:
         print(f"❌ Error crítico: {e}")
