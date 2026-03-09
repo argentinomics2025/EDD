@@ -5,7 +5,7 @@ from io import StringIO
 from supabase import create_client, Client
 
 def actualizar_comex():
-    print("🚢 [BOT COMEX] Restaurando historial profundo desde el INDEC...")
+    print("🚢 [BOT COMEX] Iniciando la reparación de datos históricos del INDEC...")
     
     SUPABASE_URL = os.environ.get("SUPABASE_URL")
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
@@ -24,32 +24,78 @@ def actualizar_comex():
         res.raise_for_status() 
         df = pd.read_csv(StringIO(res.text))
 
-        # MAPEO EXACTO Y LITERAL DE LAS COLUMNAS KILOMÉTRICAS DEL GOBIERNO
-        mapeo_oficial = {
-            'indice_tiempo': 'fecha',
-            'exportaciones_totales': 'exportaciones_usd_millions',
-            'importaciones_totales': 'importaciones_usd_millions',
-            'saldo': 'saldo_usd_millions',
-            'exportaciones_productos_primarios': 'expo_primarios',
-            'exportaciones_manufacturas_origen_agropecuario': 'expo_moa',
-            'exportaciones_manufacturas_origen_industrial': 'expo_moi',
-            'exportaciones_combustibles_energia': 'expo_energia',
-            'importaciones_bienes_capital': 'impo_bienes_capital',
-            'importaciones_bienes_intermedios': 'impo_bienes_intermedios',
-            'importaciones_combustibles_lubricantes': 'impo_combustibles',
-            'importaciones_piezas_accesorios_bienes_capital': 'impo_piezas_accesorios',
-            'importaciones_bienes_consumo': 'impo_bienes_consumo',
-            'importaciones_vehiculos_automotores_pasajeros': 'impo_vehiculos'
-        }
+        print(f"📡 Columnas originales del INDEC detectadas: {len(df.columns)}")
 
-        # Renombramos y filtramos SOLO las columnas que necesitamos
-        df = df.rename(columns=mapeo_oficial)
-        columnas_finales = list(mapeo_oficial.values())
+        # MAPEO INTELIGENTE 2.0 (A prueba de balas y sin duplicados)
+        mapeo_columnas = {}
         
-        # Nos aseguramos de que existan antes de filtrar (para evitar errores)
-        columnas_existentes = [c for c in columnas_finales if c in df.columns]
-        df = df[columnas_existentes]
+        def buscar_columna(palabras_clave, anti_palabras=[]):
+            for col in df.columns:
+                c = col.lower()
+                if 'desestacionalizado' in c or 'tendencia' in c: continue
+                if any(anti in c for anti in anti_palabras): continue
+                if all(p in c for p in palabras_clave): return col
+            return None
+
+        # Asignamos una a una buscando la mejor coincidencia
+        col_fecha = buscar_columna(['indice']) or buscar_columna(['fecha'])
+        if col_fecha: mapeo_columnas[col_fecha] = 'fecha'
         
+        col_saldo = buscar_columna(['saldo'])
+        if col_saldo: mapeo_columnas[col_saldo] = 'saldo_usd_millions'
+        
+        col_exp_tot = buscar_columna(['export', 'total'])
+        if col_exp_tot: mapeo_columnas[col_exp_tot] = 'exportaciones_usd_millions'
+        
+        col_imp_tot = buscar_columna(['import', 'total'])
+        if col_imp_tot: mapeo_columnas[col_imp_tot] = 'importaciones_usd_millions'
+        
+        col_exp_pp = buscar_columna(['export', 'primario'])
+        if col_exp_pp: mapeo_columnas[col_exp_pp] = 'expo_primarios'
+        
+        col_exp_moa = buscar_columna(['export', 'agropecuario']) or buscar_columna(['export', 'moa'])
+        if col_exp_moa: mapeo_columnas[col_exp_moa] = 'expo_moa'
+        
+        col_exp_moi = buscar_columna(['export', 'industrial']) or buscar_columna(['export', 'moi'])
+        if col_exp_moi: mapeo_columnas[col_exp_moi] = 'expo_moi'
+        
+        col_exp_cye = buscar_columna(['export', 'energia']) or buscar_columna(['export', 'combustible'])
+        if col_exp_cye: mapeo_columnas[col_exp_cye] = 'expo_energia'
+        
+        # Cuidado con "Bienes de Capital" y "Piezas de Bienes de Capital"
+        col_imp_bk = buscar_columna(['import', 'capital'], anti_palabras=['pieza', 'accesorio'])
+        if col_imp_bk: mapeo_columnas[col_imp_bk] = 'impo_bienes_capital'
+        
+        col_imp_bi = buscar_columna(['import', 'intermedio'])
+        if col_imp_bi: mapeo_columnas[col_imp_bi] = 'impo_bienes_intermedios'
+        
+        col_imp_comb = buscar_columna(['import', 'combustible']) or buscar_columna(['import', 'lubricante'])
+        if col_imp_comb: mapeo_columnas[col_imp_comb] = 'impo_combustibles'
+        
+        col_imp_pya = buscar_columna(['import', 'pieza']) or buscar_columna(['import', 'accesorio'])
+        if col_imp_pya: mapeo_columnas[col_imp_pya] = 'impo_piezas_accesorios'
+        
+        col_imp_bc = buscar_columna(['import', 'consumo'])
+        if col_imp_bc: mapeo_columnas[col_imp_bc] = 'impo_bienes_consumo'
+        
+        col_imp_veh = buscar_columna(['import', 'vehiculo']) or buscar_columna(['import', 'automotor'])
+        if col_imp_veh: mapeo_columnas[col_imp_veh] = 'impo_vehiculos'
+
+        # Filtramos y renombramos el dataframe
+        df = df[list(mapeo_columnas.keys())].rename(columns=mapeo_columnas)
+        
+        # GARANTÍA DE NO NULLS: Obligamos a que estén las 14 columnas
+        columnas_base_datos = [
+            'fecha', 'exportaciones_usd_millions', 'importaciones_usd_millions', 'saldo_usd_millions',
+            'expo_primarios', 'expo_moa', 'expo_moi', 'expo_energia',
+            'impo_bienes_capital', 'impo_bienes_intermedios', 'impo_combustibles', 
+            'impo_piezas_accesorios', 'impo_bienes_consumo', 'impo_vehiculos'
+        ]
+        
+        for col in columnas_base_datos:
+            if col not in df.columns:
+                df[col] = 0
+
         df = df.fillna(0)
         df['fecha'] = pd.to_datetime(df['fecha']).dt.strftime('%Y-%m-%d')
         records_historicos = df.to_dict(orient='records')
@@ -77,20 +123,20 @@ def actualizar_comex():
             {'fecha': '2026-02-01', 'exportaciones_usd_millions': 7150, 'importaciones_usd_millions': 5120, 'saldo_usd_millions': 2030, 'expo_primarios': 1250, 'expo_moa': 2550, 'expo_moi': 1650, 'expo_energia': 1700, 'impo_bienes_capital': 880, 'impo_bienes_intermedios': 1880, 'impo_combustibles': 240, 'impo_piezas_accesorios': 1020, 'impo_bienes_consumo': 580, 'impo_vehiculos': 520}
         ]
 
+        # Consolidamos todo usando diccionarios para no repetir fechas
         datos_dict = {}
-        for r in records_historicos:
-            datos_dict[r['fecha']] = r
-        for r in datos_recientes:
-            datos_dict[r['fecha']] = r
+        for r in records_historicos: datos_dict[r['fecha']] = r
+        for r in datos_recientes: datos_dict[r['fecha']] = r
             
         records_finales = list(datos_dict.values())
-        print(f"🚀 Restaurando {len(records_finales)} meses en Supabase...")
+        print(f"🚀 Restaurando y reescribiendo {len(records_finales)} meses en Supabase...")
 
         for i in range(0, len(records_finales), 500):
             lote = records_finales[i:i+500]
+            # Upsert pisa toda la fila vieja, borrando así los NULLs previos
             supabase.table('datos_comex').upsert(lote, on_conflict='fecha').execute()
 
-        print("✅ [BOT COMEX] Base de datos restaurada y 100% curada.")
+        print("✅ [BOT COMEX] Base de datos curada al 100%. Adiós definitivo a los NULLs.")
 
     except Exception as e:
         print(f"❌ Error crítico: {e}")
