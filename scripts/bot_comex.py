@@ -30,27 +30,20 @@ def actualizar_comex():
         
         df = pd.read_csv(StringIO(response.text))
 
-        # 1. TRADUCTOR INTELIGENTE: Identifica cualquier variante de nombre del INDEC
         mapeo_columnas = {}
         for col in df.columns:
             c = col.lower()
-            # Ignoramos series desestacionalizadas para no duplicar
             if 'desestacionalizado' in c or 'tendencia' in c:
                 continue
             
-            # Totales y Fechas
             if 'indice' in c or 'fecha' in c: mapeo_columnas[col] = 'fecha'
             elif 'saldo' in c: mapeo_columnas[col] = 'saldo_usd_millions'
             elif 'export' in c and 'total' in c: mapeo_columnas[col] = 'exportaciones_usd_millions'
             elif 'import' in c and 'total' in c: mapeo_columnas[col] = 'importaciones_usd_millions'
-            
-            # Matrices Exportadoras
             elif 'primario' in c: mapeo_columnas[col] = 'expo_primarios'
             elif 'agropecuario' in c or 'moa' in c: mapeo_columnas[col] = 'expo_moa'
             elif 'industrial' in c or 'moi' in c: mapeo_columnas[col] = 'expo_moi'
             elif ('energia' in c or 'combustible' in c) and 'export' in c: mapeo_columnas[col] = 'expo_energia'
-            
-            # Matrices Importadoras
             elif 'capital' in c: mapeo_columnas[col] = 'impo_bienes_capital'
             elif 'intermedio' in c: mapeo_columnas[col] = 'impo_bienes_intermedios'
             elif 'combustible' in c and 'import' in c: mapeo_columnas[col] = 'impo_combustibles'
@@ -60,17 +53,18 @@ def actualizar_comex():
 
         df = df[list(mapeo_columnas.keys())].rename(columns=mapeo_columnas)
         df = df.fillna(0)
+        
+        # Formateamos bien la fecha para que a Supabase le guste
+        df['fecha'] = pd.to_datetime(df['fecha']).dt.strftime('%Y-%m-%d')
+        
         records_historicos = df.to_dict(orient='records')
 
-        # 2. INYECTOR DE DATOS RECIENTES (2024 - 2026) CON DETALLE COMPLETO
-        # La API del gobierno suele estar desfasada 1 año. Inyectamos los meses recientes manualmente.
         datos_recientes = [
             {'fecha': '2024-09-01', 'exportaciones_usd_millions': 6934, 'importaciones_usd_millions': 5954, 'saldo_usd_millions': 980, 'expo_primarios': 1446, 'expo_moa': 2816, 'expo_moi': 1845, 'expo_energia': 827, 'impo_bienes_capital': 1020, 'impo_bienes_intermedios': 2100, 'impo_combustibles': 350, 'impo_piezas_accesorios': 1200, 'impo_bienes_consumo': 680, 'impo_vehiculos': 604},
             {'fecha': '2024-10-01', 'exportaciones_usd_millions': 6128, 'importaciones_usd_millions': 6010, 'saldo_usd_millions': 118, 'expo_primarios': 1029, 'expo_moa': 2398, 'expo_moi': 1888, 'expo_energia': 813, 'impo_bienes_capital': 1050, 'impo_bienes_intermedios': 2150, 'impo_combustibles': 400, 'impo_piezas_accesorios': 1250, 'impo_bienes_consumo': 600, 'impo_vehiculos': 560},
             {'fecha': '2024-11-01', 'exportaciones_usd_millions': 6480, 'importaciones_usd_millions': 5459, 'saldo_usd_millions': 1021, 'expo_primarios': 1050, 'expo_moa': 2400, 'expo_moi': 2100, 'expo_energia': 930, 'impo_bienes_capital': 980, 'impo_bienes_intermedios': 1900, 'impo_combustibles': 300, 'impo_piezas_accesorios': 1100, 'impo_bienes_consumo': 650, 'impo_vehiculos': 529},
             {'fecha': '2024-12-01', 'exportaciones_usd_millions': 6200, 'importaciones_usd_millions': 5100, 'saldo_usd_millions': 1100, 'expo_primarios': 950, 'expo_moa': 2300, 'expo_moi': 2050, 'expo_energia': 900, 'impo_bienes_capital': 950, 'impo_bienes_intermedios': 1800, 'impo_combustibles': 320, 'impo_piezas_accesorios': 1000, 'impo_bienes_consumo': 550, 'impo_vehiculos': 480},
             
-            # Datos 2025
             {'fecha': '2025-01-01', 'exportaciones_usd_millions': 5800, 'importaciones_usd_millions': 4800, 'saldo_usd_millions': 1000, 'expo_primarios': 1100, 'expo_moa': 2100, 'expo_moi': 1800, 'expo_energia': 800, 'impo_bienes_capital': 900, 'impo_bienes_intermedios': 1700, 'impo_combustibles': 250, 'impo_piezas_accesorios': 1100, 'impo_bienes_consumo': 500, 'impo_vehiculos': 350},
             {'fecha': '2025-02-01', 'exportaciones_usd_millions': 5900, 'importaciones_usd_millions': 4700, 'saldo_usd_millions': 1200, 'expo_primarios': 1150, 'expo_moa': 2150, 'expo_moi': 1750, 'expo_energia': 850, 'impo_bienes_capital': 880, 'impo_bienes_intermedios': 1650, 'impo_combustibles': 220, 'impo_piezas_accesorios': 1050, 'impo_bienes_consumo': 520, 'impo_vehiculos': 380},
             {'fecha': '2025-03-01', 'exportaciones_usd_millions': 6500, 'importaciones_usd_millions': 4900, 'saldo_usd_millions': 1600, 'expo_primarios': 1700, 'expo_moa': 2400, 'expo_moi': 1500, 'expo_energia': 900, 'impo_bienes_capital': 920, 'impo_bienes_intermedios': 1750, 'impo_combustibles': 240, 'impo_piezas_accesorios': 1100, 'impo_bienes_consumo': 500, 'impo_vehiculos': 390},
@@ -84,21 +78,28 @@ def actualizar_comex():
             {'fecha': '2025-11-01', 'exportaciones_usd_millions': 8096, 'importaciones_usd_millions': 5598, 'saldo_usd_millions': 2498, 'expo_primarios': 1550, 'expo_moa': 2950, 'expo_moi': 1900, 'expo_energia': 1696, 'impo_bienes_capital': 1000, 'impo_bienes_intermedios': 2000, 'impo_combustibles': 300, 'impo_piezas_accesorios': 1100, 'impo_bienes_consumo': 650, 'impo_vehiculos': 548},
             {'fecha': '2025-12-01', 'exportaciones_usd_millions': 7448, 'importaciones_usd_millions': 5556, 'saldo_usd_millions': 1892, 'expo_primarios': 1300, 'expo_moa': 2700, 'expo_moi': 1800, 'expo_energia': 1648, 'impo_bienes_capital': 950, 'impo_bienes_intermedios': 2000, 'impo_combustibles': 280, 'impo_piezas_accesorios': 1100, 'impo_bienes_consumo': 700, 'impo_vehiculos': 526},
             
-            # Datos 2026 (Para llegar a la fecha actual)
             {'fecha': '2026-01-01', 'exportaciones_usd_millions': 7057, 'importaciones_usd_millions': 5070, 'saldo_usd_millions': 1987, 'expo_primarios': 1200, 'expo_moa': 2500, 'expo_moi': 1700, 'expo_energia': 1657, 'impo_bienes_capital': 850, 'impo_bienes_intermedios': 1850, 'impo_combustibles': 250, 'impo_piezas_accesorios': 1000, 'impo_bienes_consumo': 600, 'impo_vehiculos': 520},
             {'fecha': '2026-02-01', 'exportaciones_usd_millions': 7150, 'importaciones_usd_millions': 5120, 'saldo_usd_millions': 2030, 'expo_primarios': 1250, 'expo_moa': 2550, 'expo_moi': 1650, 'expo_energia': 1700, 'impo_bienes_capital': 880, 'impo_bienes_intermedios': 1880, 'impo_combustibles': 240, 'impo_piezas_accesorios': 1020, 'impo_bienes_consumo': 580, 'impo_vehiculos': 520}
         ]
 
-        # Pegamos los datos históricos con los recientes
-        records_finales = records_historicos + datos_recientes
+        # ELIMINADOR DE DUPLICADOS EN PYTHON:
+        # Clavamos todo en un diccionario usando 'fecha' como ID. 
+        # Los datos manuales pisan los viejos del INDEC si la fecha es igual.
+        datos_dict = {}
+        for r in records_historicos:
+            datos_dict[r['fecha']] = r
+        for r in datos_recientes:
+            datos_dict[r['fecha']] = r
+            
+        records_finales = list(datos_dict.values())
 
         print(f"📊 [BOT COMEX] Se identificaron y mapearon {len(mapeo_columnas)} columnas clave.")
-        print(f"🚀 Subiendo todo el historial + datos recientes a Supabase...")
+        print(f"🚀 Subiendo todo el historial ({len(records_finales)} meses) a Supabase...")
 
-        # 3. SUBIDA EN LOTES (Para no saturar Supabase)
+        # LA SOLUCIÓN DE CONFLICTO: Le sumamos "on_conflict='fecha'" a la inyección
         for i in range(0, len(records_finales), 500):
             lote = records_finales[i:i+500]
-            supabase.table('datos_comex').upsert(lote).execute()
+            supabase.table('datos_comex').upsert(lote, on_conflict='fecha').execute()
 
         print("✅ [BOT COMEX] ¡Misión cumplida! Base de datos de Comercio Exterior 100% lista y detallada.")
 
