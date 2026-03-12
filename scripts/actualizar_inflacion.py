@@ -18,7 +18,7 @@ def run():
     
     datos_a_guardar = []
 
-    # PASO 1: Descargar el historial consolidado de la API (ArgentinaDatos)
+    # PASO 1: Descargar el historial consolidado de la API comunitaria
     try:
         print("   📥 Consultando API histórica...")
         url_api = "https://api.argentinadatos.com/v1/finanzas/indices/inflacion"
@@ -40,28 +40,32 @@ def run():
     except Exception as e:
         print(f"   ❌ Error leyendo API: {e}")
 
-    # PASO 2: "Scrapear" la página oficial del INDEC para atrapar la primicia de hoy
+    # PASO 2: "Scrapear" la página oficial del INDEC para la primicia
     try:
         print("   🕵️ Buscando dato de último momento directo en INDEC.gob.ar...")
+        # Nos hacemos pasar por un navegador real para que el INDEC no nos bloquee
         req_indec = requests.get("https://www.indec.gob.ar/", headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
         
         if req_indec.status_code == 200:
-            # Quitamos las etiquetas HTML para dejar solo el texto de la página
+            # Quitamos el código HTML para dejar solo el texto puro
             texto_limpio = re.sub(r'<[^>]+>', ' ', req_indec.text)
             texto_limpio = re.sub(r'\s+', ' ', texto_limpio)
             
-            # Buscamos en qué parte del texto del inicio dice "Precios al consumidor"
+            # Buscamos dónde hablan del IPC
             idx = texto_limpio.lower().find("precios al consumidor")
             
             if idx != -1:
-                # Agarramos una ventana de texto de 50 letras para atrás y 50 para adelante
-                ventana = texto_limpio[max(0, idx-50) : idx+50]
+                # Agarramos un bloque de texto más grande (150 letras)
+                ventana = texto_limpio[max(0, idx-150) : idx+150]
                 
-                # Buscamos un número con % (ej: 2,9% o 13.2 %)
+                # IMPRIMIMOS LO QUE VE EL ROBOT PARA DEPURAR (DEBUG)
+                print(f"   🔍 Radar INDEC detectó: '...{ventana}...'")
+                
+                # Buscamos el porcentaje
                 m_val = re.search(r'([\d,.]+)\s*%', ventana)
                 
-                # Buscamos un mes y un año (ej: Febrero 2026)
-                m_fecha = re.search(r'(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+(\d{4})', ventana, re.IGNORECASE)
+                # Buscamos el mes (con o sin la palabra "de" en el medio)
+                m_fecha = re.search(r'(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s+de\s+|\s+)(\d{4})', ventana, re.IGNORECASE)
                 
                 if m_val and m_fecha:
                     valor_indec = float(m_val.group(1).replace(',', '.'))
@@ -74,10 +78,9 @@ def run():
                         'septiembre':'09', 'octubre':'10', 'noviembre':'11', 'diciembre':'12'
                     }
                     
-                    # Le damos formato YYYY-MM-01
                     fecha_indec = f"{anio}-{meses_dict[mes_nombre]}-01"
                     
-                    # Chequeamos si la API comunitaria ya traía este dato. Si no, lo agregamos como primicia.
+                    # Verificamos si el dato ya bajó de la API, si no, lo inyectamos
                     existe = any(d['date'] == fecha_indec for d in datos_a_guardar)
                     if not existe:
                         datos_a_guardar.append({
@@ -86,11 +89,15 @@ def run():
                         })
                         print(f"   🌟 ¡Primicia atrapada! INDEC publicó {mes_nombre.capitalize()} {anio}: {valor_indec}%")
                     else:
-                        print("   ✅ El dato oficial ya estaba incluido en el historial.")
+                        print("   ✅ El dato oficial ya estaba en la API.")
+                else:
+                    print("   ⚠️ El robot encontró la sección, pero no pudo identificar el formato del mes y el porcentaje.")
+            else:
+                print("   ⚠️ No se encontró la frase 'precios al consumidor' en el inicio.")
     except Exception as e_indec:
         print(f"   ⚠️ Aviso: No se pudo inspeccionar el sitio del INDEC ({e_indec})")
 
-    # PASO 3: Guardar todo en Supabase de un solo golpe
+    # PASO 3: Guardar todo en Supabase
     if datos_a_guardar:
         try:
             print("   💾 Guardando en base de datos...")
@@ -99,7 +106,7 @@ def run():
                 on_conflict='date'
             ).execute()
             
-            print(f"✅ ¡Robot completado con éxito! ({len(datos_a_guardar)} meses actualizados).")
+            print(f"✅ ¡Robot completado con éxito! ({len(datos_a_guardar)} meses procesados).")
         except Exception as bd_err:
             print(f"   ❌ Error guardando en Supabase: {bd_err}")
     else:
