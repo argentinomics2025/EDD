@@ -25,27 +25,35 @@ def run():
             
             # Agarramos los últimos 60 meses (5 años) para tener buena historia para la interanual
             ultimos_datos = datos[-60:]
-            guardados = 0
+            
+            # Creamos una lista vacía para guardar todo en bloque (Mucho más eficiente)
+            datos_a_guardar = []
             
             for item in ultimos_datos:
                 fecha = item.get('fecha')
                 valor = item.get('valor')
                 
                 if fecha and valor is not None:
-                    # En tu Dashboard vi que usás la propiedad 'date' y 'value'
-                    # Así que lo guardamos con esos nombres de columnas para que encaje perfecto
-                    
-                    try:
-                        # Hacemos upsert usando la fecha como llave única
-                        supabase.table('datos_inflacion').upsert({
-                            'date': fecha,
-                            'value': round(float(valor), 2)
-                        }, on_conflict='date').execute()
-                        guardados += 1
-                    except Exception as bd_err:
-                        print(f"   ⚠️ Error guardando {fecha}: {bd_err}")
+                    # Agregamos el dato a nuestro paquete
+                    datos_a_guardar.append({
+                        'date': fecha,
+                        'value': round(float(valor), 2)
+                    })
             
-            print(f"✅ ¡Robot completado! Se actualizaron {guardados} meses de Inflación histórica.")
+            # Si hay datos para guardar, mandamos el paquete entero a Supabase de una sola vez
+            if datos_a_guardar:
+                try:
+                    supabase.table('datos_inflacion').upsert(
+                        datos_a_guardar, 
+                        on_conflict='date'
+                    ).execute()
+                    
+                    print(f"✅ ¡Robot completado! Se actualizaron {len(datos_a_guardar)} meses de Inflación histórica.")
+                except Exception as bd_err:
+                    print(f"   ⚠️ Error guardando en Supabase: {bd_err}")
+            else:
+                print("⚠️ No se encontraron datos válidos para guardar.")
+
         else:
             print(f"❌ Error de conexión API: HTTP {r.status_code}")
             
