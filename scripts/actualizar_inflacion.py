@@ -36,7 +36,6 @@ def run():
                 fecha = item.get('fecha')
                 valor = item.get('valor')
                 if fecha and valor is not None:
-                    # Usamos un diccionario con la fecha de llave para no duplicar
                     datos_a_guardar[fecha] = round(float(valor), 2)
         else:
             print(f"   ⚠️ Error de conexión API histórica: HTTP {r.status_code}")
@@ -51,8 +50,13 @@ def run():
         print("   🏦 Consultando API oficial del BCRA para la primicia de hoy...")
         url_bcra = "https://api.bcra.gob.ar/estadisticas/v1/principalesvariables"
         
-        # verify=False es clave porque la web del BCRA suele dar problemas de certificado
-        r_bcra = requests.get(url_bcra, verify=False, timeout=15)
+        # EL SECRETO: Falsificamos nuestra identidad para parecer un navegador Chrome real
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "application/json"
+        }
+        
+        r_bcra = requests.get(url_bcra, headers=headers, verify=False, timeout=15)
         
         if r_bcra.status_code == 200:
             data_bcra = r_bcra.json().get("results", [])
@@ -62,10 +66,15 @@ def run():
             
             if inflacion_bcra:
                 valor_primicia = round(float(inflacion_bcra["valor"]), 2)
-                fecha_raw = inflacion_bcra["fecha"] # Viene como "31/02/2026"
+                fecha_raw = inflacion_bcra["fecha"] 
                 
-                # Convertimos la fecha del BCRA al formato que usa tu base de datos (YYYY-MM-01)
-                fecha_dt = datetime.datetime.strptime(fecha_raw, "%d/%m/%Y")
+                # Manejamos las dos formas en que el BCRA suele mandar las fechas
+                if "/" in fecha_raw:
+                    fecha_dt = datetime.datetime.strptime(fecha_raw, "%d/%m/%Y")
+                else:
+                    fecha_dt = datetime.datetime.strptime(fecha_raw.split("T")[0], "%Y-%m-%d")
+                    
+                # Convertimos al formato de tu base de datos (Ej: 2026-02-01)
                 fecha_formateada = fecha_dt.replace(day=1).strftime("%Y-%m-%d")
                 
                 if fecha_formateada not in datos_a_guardar:
@@ -77,6 +86,8 @@ def run():
                 print("   ⚠️ No se encontró la variable de inflación (ID 27) en el BCRA.")
         else:
             print(f"   ⚠️ BCRA rechazó la conexión. HTTP {r_bcra.status_code}")
+            # Mostramos el texto de error por si nos siguen bloqueando
+            print(f"   🔍 Motivo del rechazo: {r_bcra.text[:150]}")
     except Exception as e_bcra:
         print(f"   ⚠️ Error explorando BCRA: {e_bcra}")
 
@@ -88,10 +99,7 @@ def run():
         try:
             print("   💾 Guardando en base de datos...")
             
-            # Convertimos el diccionario en la lista que espera Supabase
             paquete_final = [{"date": k, "value": v} for k, v in datos_a_guardar.items()]
-            
-            # Ordenamos por fecha para mantener prolijidad
             paquete_final = sorted(paquete_final, key=lambda x: x['date'])
             
             supabase.table('datos_inflacion').upsert(
