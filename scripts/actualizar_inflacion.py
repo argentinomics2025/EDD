@@ -48,11 +48,12 @@ def run():
     # -------------------------------------------------------------------------
     try:
         print("   🏦 Consultando API oficial del BCRA para la primicia de hoy...")
-        url_bcra = "https://api.bcra.gob.ar/estadisticas/v1/principalesvariables"
         
-        # EL SECRETO: Falsificamos nuestra identidad para parecer un navegador Chrome real
+        # EL ÚNICO CAMBIO: Actualizamos la URL a la versión 2.0 (v2.0)
+        url_bcra = "https://api.bcra.gob.ar/estadisticas/v2.0/PrincipalesVariables"
+        
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "application/json"
         }
         
@@ -86,7 +87,6 @@ def run():
                 print("   ⚠️ No se encontró la variable de inflación (ID 27) en el BCRA.")
         else:
             print(f"   ⚠️ BCRA rechazó la conexión. HTTP {r_bcra.status_code}")
-            # Mostramos el texto de error por si nos siguen bloqueando
             print(f"   🔍 Motivo del rechazo: {r_bcra.text[:150]}")
     except Exception as e_bcra:
         print(f"   ⚠️ Error explorando BCRA: {e_bcra}")
