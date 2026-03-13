@@ -2,7 +2,6 @@ import os
 import re
 import requests
 import datetime
-from bs4 import BeautifulSoup
 
 # ──────────────────────────────────────────────
 #  CONFIGURACIÓN
@@ -22,213 +21,99 @@ HEADERS = {
                   'AppleWebKit/537.36 (KHTML, like Gecko) '
                   'Chrome/120.0.0.0 Safari/537.36',
     'Accept-Language': 'es-AR,es;q=0.9',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 }
 
 # ──────────────────────────────────────────────
-#  SCRAPER PRINCIPAL: HOME DEL INDEC
-#  El home siempre muestra el último dato de IPC
-#  en la sección "Últimas noticias" o "Destacados"
+#  HELPERS
 # ──────────────────────────────────────────────
 
-def scrapear_home_indec():
+def limpiar_html(html):
+    """Elimina tags HTML y deja solo texto plano."""
+    html = re.sub(r'<script[^>]*>.*?</script>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r'<style[^>]*>.*?</style>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r'<[^>]+>', ' ', html)
+    html = re.sub(r'&nbsp;', ' ', html)
+    html = re.sub(r'&[a-z]+;', ' ', html)
+    return re.sub(r'\s+', ' ', html).lower().strip()
+
+
+def extraer_dato(texto):
     """
-    Extrae el dato de inflación mensual más reciente
-    directamente desde el home del INDEC (indec.gob.ar).
-    
-    Retorna: dict con 'date' (YYYY-MM-01) y 'value' (float)
-             o None si no se encontró.
-    """
-    url = "https://www.indec.gob.ar"
-    
-    try:
-        print(f"   🌐 Conectando a {url}...")
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-        resp.encoding = 'utf-8'
-        
-    except requests.exceptions.Timeout:
-        print("   ❌ Timeout al conectar con el INDEC.")
-        return None
-    except requests.exceptions.HTTPError as e:
-        print(f"   ❌ Error HTTP: {e}")
-        return None
-    except requests.exceptions.RequestException as e:
-        print(f"   ❌ Error de red: {e}")
-        return None
-
-    soup = BeautifulSoup(resp.text, 'html.parser')
-
-    # ── ESTRATEGIA 1: Buscar en bloques de noticias/destacados
-    #    El INDEC usa clases como 'destacado', 'nota', 'novedad', 'card'
-    resultado = _buscar_en_bloques(soup)
-    if resultado:
-        return resultado
-
-    # ── ESTRATEGIA 2: Buscar el patrón numérico en TODO el texto visible
-    resultado = _buscar_patron_en_texto(soup)
-    if resultado:
-        return resultado
-
-    print("   ⚠️  No se encontró el dato de IPC en el home del INDEC.")
-    print("   🔍  Intentando con página de informes técnicos como respaldo...")
-    return scrapear_informes_tecnicos()
-
-
-def _buscar_en_bloques(soup):
-    """
-    Busca el dato dentro de tarjetas/bloques HTML del home.
-    El INDEC muestra 'Precios al consumidor' con el % y el mes.
-    """
-    # Selectores habituales del home del INDEC (actualizables si cambia el diseño)
-    selectores = [
-        'div.destacado', 'div.nota', 'div.novedad',
-        'article', 'div.card', 'div.titulo', 'li.item',
-        'div.col-sm-6', 'div.col-md-4', 'div.panel',
-    ]
-    
-    for selector in selectores:
-        bloques = soup.select(selector)
-        for bloque in bloques:
-            texto = bloque.get_text(separator=' ', strip=True).lower()
-            
-            # Verificamos que el bloque sea sobre IPC/Precios al consumidor
-            es_ipc = any(kw in texto for kw in [
-                'precios al consumidor', 'índice de precios',
-                'ipc', 'inflación', 'inflacion'
-            ])
-            
-            if not es_ipc:
-                continue
-            
-            dato = _extraer_dato_del_texto(texto)
-            if dato:
-                print(f"   ✅ Dato encontrado en bloque '{selector}'")
-                return dato
-    
-    return None
-
-
-def _buscar_patron_en_texto(soup):
-    """
-    Fallback: extrae todo el texto visible y busca el patrón
-    de variación mensual de precios.
-    """
-    texto_completo = soup.get_text(separator=' ', strip=True).lower()
-    return _extraer_dato_del_texto(texto_completo)
-
-
-def _extraer_dato_del_texto(texto):
-    """
-    Aplica múltiples patrones regex para encontrar el dato de inflación.
+    Aplica múltiples patrones para encontrar el dato de inflación mensual.
     Retorna dict {'date': 'YYYY-MM-01', 'value': float} o None.
     """
-    # Normalizamos el texto
-    texto = texto.replace('\xa0', ' ').replace('\n', ' ')
-    texto = re.sub(r'\s+', ' ', texto)
-
     patrones = [
         # "variación de 2,9% en febrero de 2026"
         r"variaci[oó]n\s+de\s+([\d,.]+)%\s+en\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})",
         # "registró en febrero de 2026 una variación de 2,9%"
         r"registr[oó]\s+en\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})\s+una\s+variaci[oó]n\s+de\s+([\d,.]+)%",
-        # "febrero 2026: 2,9%"  o  "febrero de 2026 | 2,9%"
-        r"(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+(?:de\s+)?(\d{4})[\s|:–-]+([\d,.]+)%",
-        # "2,9% febrero 2026"
-        r"([\d,.]+)%\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+(?:de\s+)?(\d{4})",
-        # "precios al consumidor ... 2,9% ... febrero 2026"  (orden libre, ventana de 120 chars)
-        r"precios al consumidor.{0,120}?([\d,.]+)%",
+        # "febrero de 2026 ... 2,9%"  (ventana de 80 chars)
+        r"(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4}).{0,80}?([\d,.]+)%",
+        # "2,9% en febrero de 2026"
+        r"([\d,.]+)%\s+en\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})",
     ]
 
     for i, patron in enumerate(patrones):
         m = re.search(patron, texto)
         if not m:
             continue
-        
-        grupos = m.groups()
-        
         try:
-            if i == 0:
-                # variación de X% en MES de AÑO
-                valor, mes_nombre, anio = grupos
-            elif i == 1:
-                # registró en MES de AÑO una variación de X%
-                mes_nombre, anio, valor = grupos
-            elif i == 2:
-                # MES AÑO: X%
-                mes_nombre, anio, valor = grupos
-            elif i == 3:
-                # X% MES AÑO
-                valor, mes_nombre, anio = grupos
-            elif i == 4:
-                # patrón libre — solo tenemos el valor, necesitamos mes/año
-                valor = grupos[0]
-                mes_nombre, anio = _buscar_mes_anio_cercano(texto, m.start())
-                if not mes_nombre:
-                    continue
-            
-            valor_float = float(str(valor).replace(',', '.'))
-            mes_nombre = mes_nombre.strip().replace('setiembre', 'septiembre')
-            anio = str(anio).strip()
-            fecha = f"{anio}-{MESES[mes_nombre]}-01"
-            
-            return {'date': fecha, 'value': round(valor_float, 2)}
-        
+            g = m.groups()
+            if i in (0, 2):   # valor, mes, año  ó  mes, año, valor
+                if i == 0:
+                    valor, mes, anio = g
+                else:
+                    mes, anio, valor = g
+            elif i == 1:      # mes, año, valor
+                mes, anio, valor = g
+            elif i == 3:      # valor, mes, año
+                valor, mes, anio = g
+
+            valor_f = float(str(valor).replace(',', '.'))
+            mes = mes.strip().replace('setiembre', 'septiembre')
+            fecha = f"{anio}-{MESES[mes]}-01"
+            return {'date': fecha, 'value': round(valor_f, 2)}
         except (ValueError, KeyError):
             continue
-    
+
     return None
 
 
-def _buscar_mes_anio_cercano(texto, pos_inicio, ventana=200):
-    """
-    Busca el mes y año más cercano a una posición dada en el texto.
-    Útil cuando encontramos el % pero no el mes en el mismo patrón.
-    """
-    fragmento = texto[max(0, pos_inicio - ventana): pos_inicio + ventana]
-    patron_fecha = r"(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+(?:de\s+)?(\d{4})"
-    m = re.search(patron_fecha, fragmento)
-    if m:
-        return m.group(1), m.group(2)
-    return None, None
-
-
 # ──────────────────────────────────────────────
-#  SCRAPER RESPALDO: INFORMES TÉCNICOS DEL INDEC
+#  FUENTES
 # ──────────────────────────────────────────────
 
-def scrapear_informes_tecnicos():
-    """
-    Respaldo: página de informes técnicos de IPC (ID 31).
-    Tiene el comunicado oficial con la cifra exacta.
-    """
-    url = "https://www.indec.gob.ar/indec/web/Institucional-Indec-InformesTecnicos-31"
-    
+def scrapear_indec_home():
+    """Scraping del home del INDEC (fuente primaria)."""
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        texto = soup.get_text(separator=' ', strip=True).lower()
-        dato = _extraer_dato_del_texto(texto)
-        if dato:
-            print(f"   ✅ Dato encontrado en informes técnicos: {dato}")
-        return dato
+        print("   🌐 Scraping home INDEC...")
+        r = requests.get("https://www.indec.gob.ar", headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        texto = limpiar_html(r.text)
+        return extraer_dato(texto)
     except Exception as e:
-        print(f"   ❌ Error en informes técnicos: {e}")
+        print(f"   ⚠️  Home INDEC: {e}")
         return None
 
 
-# ──────────────────────────────────────────────
-#  FUENTE ALTERNATIVA: API ARGENTINADATOS
-# ──────────────────────────────────────────────
-
-def obtener_dato_api_comunitaria():
-    """
-    Consulta la API comunitaria de ArgentinaDatos.
-    Retorna el último dato disponible como dict.
-    """
+def scrapear_indec_informes():
+    """Scraping de la página de informes técnicos IPC (respaldo 1)."""
     try:
-        print("   📡 Consultando API ArgentinaDatos como respaldo...")
+        print("   🌐 Scraping informes técnicos INDEC...")
+        url = "https://www.indec.gob.ar/indec/web/Institucional-Indec-InformesTecnicos-31"
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        texto = limpiar_html(r.text)
+        return extraer_dato(texto)
+    except Exception as e:
+        print(f"   ⚠️  Informes INDEC: {e}")
+        return None
+
+
+def obtener_api_comunitaria():
+    """API ArgentinaDatos (respaldo 2)."""
+    try:
+        print("   📡 Consultando API ArgentinaDatos...")
         r = requests.get(
             "https://api.argentinadatos.com/v1/finanzas/indices/inflacion",
             timeout=20
@@ -237,73 +122,58 @@ def obtener_dato_api_comunitaria():
         datos = r.json()
         if datos:
             ultimo = datos[-1]
-            return {
-                'date': ultimo['fecha'],
-                'value': round(float(ultimo['valor']), 2)
-            }
+            return {'date': ultimo['fecha'], 'value': round(float(ultimo['valor']), 2)}
     except Exception as e:
-        print(f"   ⚠️  API comunitaria no disponible: {e}")
+        print(f"   ⚠️  API comunitaria: {e}")
     return None
 
 
 # ──────────────────────────────────────────────
-#  GUARDAR EN SUPABASE (OPCIONAL)
+#  SUPABASE
 # ──────────────────────────────────────────────
 
 def guardar_en_supabase(dato):
-    """Guarda el dato en Supabase (si las credenciales están configuradas)."""
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("   ℹ️  Supabase no configurado. Se omite el guardado.")
-        return False
-    
+        print("   ℹ️  Supabase no configurado, se omite guardado.")
+        return
     try:
         from supabase import create_client
         sb = create_client(SUPABASE_URL, SUPABASE_KEY)
         sb.table('datos_inflacion').upsert([dato], on_conflict='date').execute()
-        print(f"   💾 Guardado en Supabase: {dato}")
-        return True
-    except ImportError:
-        print("   ⚠️  supabase-py no instalado. Corré: pip install supabase")
+        print(f"   💾 Guardado en Supabase ✅")
     except Exception as e:
-        print(f"   ❌ Error guardando en Supabase: {e}")
-    return False
+        print(f"   ❌ Error Supabase: {e}")
 
 
 # ──────────────────────────────────────────────
-#  FUNCIÓN PRINCIPAL
+#  MAIN
 # ──────────────────────────────────────────────
 
 def run():
-    ts = datetime.datetime.now().strftime('%H:%M:%S')
-    print(f"[{ts}] 🤖 Robot de Inflación INDEC iniciado")
-    print("─" * 50)
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 🤖 Robot Inflación INDEC")
+    print("─" * 45)
 
-    # 1. Intentar scraping del home del INDEC (fuente primaria)
-    dato = scrapear_home_indec()
+    # Cadena de fuentes: home → informes → API
+    dato = scrapear_indec_home()
 
-    # 2. Si el INDEC no da nada, usar la API comunitaria
     if not dato:
-        print("   🔄 Usando API comunitaria como fuente alternativa...")
-        dato = obtener_dato_api_comunitaria()
+        dato = scrapear_indec_informes()
 
-    # 3. Resultado final
-    print("─" * 50)
+    if not dato:
+        dato = obtener_api_comunitaria()
+
+    print("─" * 45)
     if dato:
-        mes_num = dato['date'][5:7]
-        anio = dato['date'][:4]
-        mes_nombre = [k for k, v in MESES.items() if v == mes_num][0].capitalize()
-        
-        print(f"📊 DATO ENCONTRADO:")
-        print(f"   📅 Período : {mes_nombre} {anio}")
-        print(f"   📈 Inflación: {dato['value']}%")
-        print(f"   🗓️  Fecha BD : {dato['date']}")
-        
+        mes_nombre = [k for k, v in MESES.items() if v == dato['date'][5:7]][0].capitalize()
+        print(f"📊 Período  : {mes_nombre} {dato['date'][:4]}")
+        print(f"📈 Inflación: {dato['value']}%")
         guardar_en_supabase(dato)
     else:
-        print("❌ No se pudo obtener el dato de inflación de ninguna fuente.")
+        print("❌ No se encontró el dato en ninguna fuente.")
+        raise SystemExit(1)  # Falla el workflow para que GitHub lo notifique
 
     return dato
 
 
 if __name__ == '__main__':
-    resultado = run()
+    run()
