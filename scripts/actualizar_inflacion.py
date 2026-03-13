@@ -36,7 +36,11 @@ def run():
                 fecha = item.get('fecha')
                 valor = item.get('valor')
                 if fecha and valor is not None:
-                    datos_a_guardar[fecha] = round(float(valor), 2)
+                    # FORZAR DÍA 01 PARA EVITAR DUPLICADOS
+                    fecha_dt = datetime.datetime.strptime(fecha[:10], "%Y-%m-%d")
+                    fecha_formateada = fecha_dt.replace(day=1).strftime("%Y-%m-%d")
+                    
+                    datos_a_guardar[fecha_formateada] = round(float(valor), 2)
         else:
             print(f"   ⚠️ Error de conexión API histórica: HTTP {r.status_code}")
     except Exception as e:
@@ -110,7 +114,7 @@ def run():
                 on_conflict='date'
             ).execute()
             
-            print(f"✅ ¡Robot completado con éxito! ({len(paquete_final)} meses sincronizados).")
+            print(f"✅ ¡Robot completado con éxito! ({len(paquete_final)} meses sincronizados sin duplicados).")
         except Exception as bd_err:
             print(f"   ❌ Error guardando en Supabase: {bd_err}")
     else:
