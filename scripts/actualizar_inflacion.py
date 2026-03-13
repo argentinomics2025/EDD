@@ -44,13 +44,13 @@ def run():
 
 
     # -------------------------------------------------------------------------
-    # PASO 2: Buscar la "Primicia" oficial de hoy en la API del Banco Central
+    # PASO 2: Buscar la "Primicia" en la nueva API v4.0 del Banco Central
     # -------------------------------------------------------------------------
     try:
-        print("   🏦 Consultando API oficial del BCRA para la primicia de hoy...")
+        print("   🏦 Consultando API oficial del BCRA (v4.0) para la primicia...")
         
-        # EL ÚNICO CAMBIO: Actualizamos la URL a la versión 2.0 (v2.0)
-        url_bcra = "https://api.bcra.gob.ar/estadisticas/v2.0/PrincipalesVariables"
+        # El BCRA cambió la ruta. Ahora la Inflación Mensual es la ruta directa /Monetarias/27
+        url_bcra = "https://api.bcra.gob.ar/estadisticas/v4.0/Monetarias/27"
         
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -60,31 +60,33 @@ def run():
         r_bcra = requests.get(url_bcra, headers=headers, verify=False, timeout=15)
         
         if r_bcra.status_code == 200:
-            data_bcra = r_bcra.json().get("results", [])
+            data_bcra = r_bcra.json()
             
-            # En la API del BCRA, la Inflación Mensual siempre es la variable ID 27
-            inflacion_bcra = next((item for item in data_bcra if item["idVariable"] == 27), None)
+            # La nueva estructura v4 trae "results" y adentro "detalle"
+            resultados = data_bcra.get("results", [])
             
-            if inflacion_bcra:
-                valor_primicia = round(float(inflacion_bcra["valor"]), 2)
-                fecha_raw = inflacion_bcra["fecha"] 
+            if resultados and "detalle" in resultados[0]:
+                detalle = resultados[0]["detalle"]
                 
-                # Manejamos las dos formas en que el BCRA suele mandar las fechas
-                if "/" in fecha_raw:
-                    fecha_dt = datetime.datetime.strptime(fecha_raw, "%d/%m/%Y")
-                else:
-                    fecha_dt = datetime.datetime.strptime(fecha_raw.split("T")[0], "%Y-%m-%d")
+                if detalle:
+                    # Ordenamos por fecha de más viejo a más nuevo y agarramos el último
+                    detalle_ordenado = sorted(detalle, key=lambda x: x["fecha"])
+                    ultimo = detalle_ordenado[-1]
                     
-                # Convertimos al formato de tu base de datos (Ej: 2026-02-01)
-                fecha_formateada = fecha_dt.replace(day=1).strftime("%Y-%m-%d")
-                
-                if fecha_formateada not in datos_a_guardar:
-                    datos_a_guardar[fecha_formateada] = valor_primicia
-                    print(f"   🌟 ¡Primicia BCRA atrapada! {fecha_formateada}: {valor_primicia}%")
-                else:
-                    print("   ✅ El dato oficial más reciente ya estaba en el historial.")
+                    valor_primicia = round(float(ultimo["valor"]), 2)
+                    fecha_raw = ultimo["fecha"] # En v4.0 ya viene súper limpio: "YYYY-MM-DD"
+                    
+                    # Forzamos a que el día sea "01" para que coincida perfecto con tu front-end
+                    fecha_dt = datetime.datetime.strptime(fecha_raw[:10], "%Y-%m-%d")
+                    fecha_formateada = fecha_dt.replace(day=1).strftime("%Y-%m-%d")
+                    
+                    if fecha_formateada not in datos_a_guardar:
+                        datos_a_guardar[fecha_formateada] = valor_primicia
+                        print(f"   🌟 ¡Primicia BCRA atrapada! {fecha_formateada}: {valor_primicia}%")
+                    else:
+                        print("   ✅ El dato oficial más reciente ya estaba en el historial.")
             else:
-                print("   ⚠️ No se encontró la variable de inflación (ID 27) en el BCRA.")
+                print("   ⚠️ La estructura del BCRA está vacía o cambió de nuevo.")
         else:
             print(f"   ⚠️ BCRA rechazó la conexión. HTTP {r_bcra.status_code}")
             print(f"   🔍 Motivo del rechazo: {r_bcra.text[:150]}")
@@ -99,6 +101,7 @@ def run():
         try:
             print("   💾 Guardando en base de datos...")
             
+            # Pasamos del diccionario a una lista para enviarla a Supabase
             paquete_final = [{"date": k, "value": v} for k, v in datos_a_guardar.items()]
             paquete_final = sorted(paquete_final, key=lambda x: x['date'])
             
