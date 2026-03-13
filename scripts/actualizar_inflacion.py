@@ -28,7 +28,6 @@ HEADERS = {
 # ──────────────────────────────────────────────
 
 def limpiar_html(html):
-    """Elimina tags HTML y deja solo texto plano."""
     html = re.sub(r'<script[^>]*>.*?</script>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
     html = re.sub(r'<style[^>]*>.*?</style>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
     html = re.sub(r'<[^>]+>', ' ', html)
@@ -38,39 +37,56 @@ def limpiar_html(html):
 
 
 def extraer_dato(texto):
-    """
-    Aplica múltiples patrones para encontrar el dato de inflación mensual.
-    Retorna dict {'date': 'YYYY-MM-01', 'value': float} o None.
-    """
+    texto = texto.replace('\xa0', ' ')
+    texto = re.sub(r'\s+', ' ', texto)
+
     patrones = [
         # "variación de 2,9% en febrero de 2026"
         r"variaci[oó]n\s+de\s+([\d,.]+)%\s+en\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})",
         # "registró en febrero de 2026 una variación de 2,9%"
         r"registr[oó]\s+en\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})\s+una\s+variaci[oó]n\s+de\s+([\d,.]+)%",
-        # "febrero de 2026 ... 2,9%"  (ventana de 80 chars)
+        # "aumentaron 2,9% en febrero de 2026"  ← tweet/comunicado INDEC
+        r"aumentaron\s+([\d,.]+)%\s+en\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})",
+        # "ipc) aumentaron 2,9% en febrero de 2026"
+        r"\(\s*ipc\s*\).{0,30}?([\d,.]+)%\s+en\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})",
+        # "febrero de 2026 ... 2,9%"
         r"(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4}).{0,80}?([\d,.]+)%",
         # "2,9% en febrero de 2026"
         r"([\d,.]+)%\s+en\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})",
+        # patrón libre
+        r"precios al consumidor.{0,120}?([\d,.]+)%",
     ]
 
-    for i, patron in enumerate(patrones):
+    orden_grupos = [
+        (0, 1, 2),  # valor, mes, año
+        (2, 0, 1),  # mes, año, valor
+        (0, 1, 2),  # valor, mes, año
+        (0, 1, 2),  # valor, mes, año
+        (2, 0, 1),  # mes, año, valor
+        (0, 1, 2),  # valor, mes, año
+        None,
+    ]
+
+    for i, (patron, orden) in enumerate(zip(patrones, orden_grupos)):
         m = re.search(patron, texto)
         if not m:
             continue
         try:
             g = m.groups()
-            if i in (0, 2):   # valor, mes, año  ó  mes, año, valor
-                if i == 0:
-                    valor, mes, anio = g
-                else:
-                    mes, anio, valor = g
-            elif i == 1:      # mes, año, valor
-                mes, anio, valor = g
-            elif i == 3:      # valor, mes, año
-                valor, mes, anio = g
+            if orden is None:
+                valor = g[0]
+                mes, anio = _buscar_mes_anio_cercano(texto, m.start())
+                if not mes:
+                    continue
+            else:
+                vi, mi, ai = orden
+                valor = g[vi]
+                mes   = g[mi]
+                anio  = g[ai]
 
             valor_f = float(str(valor).replace(',', '.'))
             mes = mes.strip().replace('setiembre', 'septiembre')
+            anio = str(anio).strip()
             fecha = f"{anio}-{MESES[mes]}-01"
             return {'date': fecha, 'value': round(valor_f, 2)}
         except (ValueError, KeyError):
@@ -79,41 +95,98 @@ def extraer_dato(texto):
     return None
 
 
+def _buscar_mes_anio_cercano(texto, pos, ventana=200):
+    fragmento = texto[max(0, pos - ventana): pos + ventana]
+    patron = (r"(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre"
+              r"|setiembre|octubre|noviembre|diciembre)\s+(?:de\s+)?(\d{4})")
+    m = re.search(patron, fragmento)
+    if m:
+        return m.group(1), m.group(2)
+    return None, None
+
+
 # ──────────────────────────────────────────────
 #  FUENTES
 # ──────────────────────────────────────────────
 
+def scrapear_indec_ipc():
+    """Página oficial del IPC en el INDEC."""
+    url = "https://www.indec.gob.ar/indec/web/Nivel4-Tema-3-5-31"
+    try:
+        print("   🌐 Scraping página IPC INDEC...")
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+        return extraer_dato(limpiar_html(r.text))
+    except Exception as e:
+        print(f"   ⚠️  Página IPC: {e}")
+        return None
+
+
 def scrapear_indec_home():
-    """Scraping del home del INDEC (fuente primaria)."""
+    """Home del INDEC."""
     try:
         print("   🌐 Scraping home INDEC...")
         r = requests.get("https://www.indec.gob.ar", headers=HEADERS, timeout=15)
         r.raise_for_status()
-        texto = limpiar_html(r.text)
-        return extraer_dato(texto)
+        return extraer_dato(limpiar_html(r.text))
     except Exception as e:
         print(f"   ⚠️  Home INDEC: {e}")
         return None
 
 
 def scrapear_indec_informes():
-    """Scraping de la página de informes técnicos IPC (respaldo 1)."""
+    """Página de Informes Técnicos IPC."""
+    url = "https://www.indec.gob.ar/indec/web/Institucional-Indec-InformesTecnicos-31"
     try:
         print("   🌐 Scraping informes técnicos INDEC...")
-        url = "https://www.indec.gob.ar/indec/web/Institucional-Indec-InformesTecnicos-31"
         r = requests.get(url, headers=HEADERS, timeout=15)
         r.raise_for_status()
-        texto = limpiar_html(r.text)
-        return extraer_dato(texto)
+        return extraer_dato(limpiar_html(r.text))
     except Exception as e:
-        print(f"   ⚠️  Informes INDEC: {e}")
+        print(f"   ⚠️  Informes: {e}")
+        return None
+
+
+def obtener_pdf_indec():
+    """Descarga el PDF del último informe IPC y extrae el dato."""
+    try:
+        print("   📄 Buscando PDF del IPC...")
+        url_inf = "https://www.indec.gob.ar/indec/web/Institucional-Indec-InformesTecnicos-31"
+        r = requests.get(url_inf, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+
+        pdfs = re.findall(
+            r'href=["\']([^"\']*(?:ipc|precios|iph)[^"\']*\.pdf)["\']',
+            r.text, flags=re.IGNORECASE
+        )
+        if not pdfs:
+            pdfs = re.findall(r'href=["\']([^"\']*\.pdf)["\']', r.text, flags=re.IGNORECASE)
+        if not pdfs:
+            return None
+
+        pdf_url = pdfs[0]
+        if not pdf_url.startswith('http'):
+            pdf_url = "https://www.indec.gob.ar" + pdf_url
+
+        print(f"   📥 PDF: {pdf_url}")
+        rp = requests.get(pdf_url, headers=HEADERS, timeout=30)
+        rp.raise_for_status()
+
+        # Extracción de texto de PDF sin librerías externas
+        contenido = rp.content.decode('latin-1', errors='ignore')
+        fragmentos = re.findall(r'\(([^()]{3,80})\)', contenido)
+        texto_pdf = ' '.join(fragmentos).lower()
+        return extraer_dato(texto_pdf)
+
+    except Exception as e:
+        print(f"   ⚠️  PDF: {e}")
         return None
 
 
 def obtener_api_comunitaria():
-    """API ArgentinaDatos (respaldo 2)."""
+    """API ArgentinaDatos como último respaldo."""
     try:
-        print("   📡 Consultando API ArgentinaDatos...")
+        print("   📡 API ArgentinaDatos...")
         r = requests.get(
             "https://api.argentinadatos.com/v1/finanzas/indices/inflacion",
             timeout=20
@@ -134,7 +207,7 @@ def obtener_api_comunitaria():
 
 def guardar_en_supabase(dato):
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("   ℹ️  Supabase no configurado, se omite guardado.")
+        print("   ℹ️  Supabase no configurado.")
         return
     try:
         from supabase import create_client
@@ -149,18 +222,25 @@ def guardar_en_supabase(dato):
 #  MAIN
 # ──────────────────────────────────────────────
 
+FUENTES = [
+    ("Página IPC INDEC",        scrapear_indec_ipc),
+    ("Home INDEC",              scrapear_indec_home),
+    ("Informes Técnicos INDEC", scrapear_indec_informes),
+    ("PDF oficial INDEC",       obtener_pdf_indec),
+    ("API ArgentinaDatos",      obtener_api_comunitaria),
+]
+
+
 def run():
     print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 🤖 Robot Inflación INDEC")
     print("─" * 45)
 
-    # Cadena de fuentes: home → informes → API
-    dato = scrapear_indec_home()
-
-    if not dato:
-        dato = scrapear_indec_informes()
-
-    if not dato:
-        dato = obtener_api_comunitaria()
+    dato = None
+    for nombre, fuente in FUENTES:
+        dato = fuente()
+        if dato:
+            print(f"   ✅ Fuente exitosa: {nombre}")
+            break
 
     print("─" * 45)
     if dato:
@@ -170,7 +250,7 @@ def run():
         guardar_en_supabase(dato)
     else:
         print("❌ No se encontró el dato en ninguna fuente.")
-        raise SystemExit(1)  # Falla el workflow para que GitHub lo notifique
+        raise SystemExit(1)
 
     return dato
 
