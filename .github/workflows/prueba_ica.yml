@@ -1,4 +1,4 @@
-name: Probar Bot ICA
+name: 🌎 Probar Bot ICA
 
 on:
   workflow_dispatch: # Esto crea el botón manual en GitHub
