@@ -19,4 +19,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Ejecutar el bot
-        run: python scripts/bot_ica.py
+       env:
+             SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+             SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+           run: python scripts/bot_ica.py
