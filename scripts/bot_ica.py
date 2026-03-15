@@ -4,16 +4,22 @@ import requests
 from supabase import create_client, Client
 from io import BytesIO
 
+# ==========================================
+# ⚙️ PANEL DE CONTROL (Actualizar cada mes)
+# ==========================================
+MES_INFORME = "Febrero 2026"
+EXCEL_URL = "https://www.indec.gob.ar/ftp/cuadros/economia/ica_cuadros_19_02_26.xls"
+# ==========================================
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def obtener_datos_ica():
-    print("🔍 Descargando el Excel del INDEC...")
-    excel_url = "https://www.indec.gob.ar/ftp/cuadros/economia/ica_cuadros_19_02_26.xls"
+    print(f"🔍 Descargando el Excel del INDEC para {MES_INFORME}...")
 
     headers = {'User-Agent': 'Mozilla/5.0'}
-    response = requests.get(excel_url, headers=headers)
+    response = requests.get(EXCEL_URL, headers=headers)
     response.raise_for_status()
 
     xl = pd.ExcelFile(BytesIO(response.content), engine='xlrd')
@@ -67,7 +73,8 @@ def obtener_datos_ica():
     # Borramos siglas por las dudas
     df = df[~df['pais'].isin(["MOI", "MOA", "PP", "CyE"])]
 
-    df['fecha_informe'] = "Febrero 2026"
+    # Asignamos el mes desde el Panel de Control
+    df['fecha_informe'] = MES_INFORME
     
     print(f"✅ Sobrevivieron {len(df)} países limpios.")
     return df.to_dict(orient='records')
@@ -77,9 +84,15 @@ def subir_a_supabase(datos):
         print("⚠️ No hay datos limpios para subir.")
         return
 
-    print(f"🚀 Subiendo {len(datos)} países a Supabase...")
-    supabase.table("socios_comerciales").delete().neq("id", 0).execute()
+    mes_actual = datos[0]['fecha_informe']
+    print(f"🚀 Subiendo {len(datos)} países a Supabase para el mes de {mes_actual}...")
+    
+    # 1. BORRA SOLO EL MES ACTUAL (Para no duplicar), DEJA EL HISTORIAL INTACTO
+    supabase.table("socios_comerciales").delete().eq("fecha_informe", mes_actual).execute()
+    
+    # 2. INSERTA LOS NUEVOS DATOS
     supabase.table("socios_comerciales").insert(datos).execute()
+    
     print("✅ ¡Sincronización completada con éxito!")
 
 if __name__ == "__main__":
