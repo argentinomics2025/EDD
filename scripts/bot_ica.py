@@ -18,54 +18,54 @@ def obtener_datos_ica():
     response.raise_for_status()
 
     xl = pd.ExcelFile(BytesIO(response.content), engine='xlrd')
-    # Buscamos la pestaña c11 que ya vimos que existe
     pestana = "c11" if "c11" in xl.sheet_names else xl.sheet_names[10]
     
     print(f"📊 Procesando pestaña: {pestana}")
-    # Saltamos 7 filas para caer justo en los datos
     df = pd.read_excel(BytesIO(response.content), sheet_name=pestana, skiprows=7, engine='xlrd')
     
-    # Nos quedamos con las primeras 4 columnas
     df = df.iloc[:, [0, 1, 2, 3]] 
     df.columns = ['pais', 'exportaciones', 'importaciones', 'saldo_comercial']
 
-    # --- LIMPIEZA ---
+    # --- MODO DETECTIVE: Ver qué lee Pandas crudo ---
+    print("\n👀 MUESTRA DE DATOS CRUDOS (Primeras 5 filas):")
+    print(df.head(5).to_string())
+    print("-------------------------------------------\n")
+
+    # --- LIMPIEZA INTELIGENTE ---
     df = df.dropna(subset=['pais'])
     df['pais'] = df['pais'].astype(str).str.strip()
 
-    # Filtro simple por palabras clave (sin caracteres raros que rompan el código)
-    basura = ["Total", "Variación", "Fuente", "Notas", "MOI", "MOA", "PP", "CyE", "Combustibles", "Dato estimado"]
-    
+    # 1. Borramos siglas SOLO si son la palabra exacta
+    siglas_exactas = ["MOI", "MOA", "PP", "CyE"]
+    df = df[~df['pais'].isin(siglas_exactas)]
+
+    # 2. Borramos notas y basuras parciales
+    basura = ["Total", "Fuente", "Notas", "Rotterdam", "Dato estimado", "ARCA"]
     for palabra in basura:
         df = df[~df['pais'].str.contains(palabra, na=False, case=False)]
 
-    # Filtro por longitud: Los párrafos largos de notas al pie se van
-    df = df[df['pais'].str.len() < 50]
-    # Los países reales tienen nombre, no son solo siglas de 2 o 3 letras (excepto USA, pero acá dice Estados Unidos)
-    df = df[df['pais'].str.len() > 3]
+    # 3. Borramos filas que empiezan con paréntesis ej: (1) o (2)
+    df = df[~df['pais'].str.startswith("(", na=False)]
+    
+    # 4. Longitud lógica: un país tiene más de 2 letras y menos de 30
+    df = df[(df['pais'].str.len() > 2) & (df['pais'].str.len() < 30)]
 
-    # Convertimos a números
+    # Convertimos a números de forma segura
     for col in ['exportaciones', 'importaciones', 'saldo_comercial']:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-    # Solo nos quedamos con filas donde haya algún movimiento de plata (evita filas vacías residuales)
-    df = df[df['exportaciones'] + df['importaciones'] > 0]
-
-    df['fecha_informe'] = "Febrero 2026"
+    print(f"✅ Sobrevivieron {len(df)} países después de limpiar.")
     
+    df['fecha_informe'] = "Febrero 2026"
     return df.to_dict(orient='records')
 
 def subir_a_supabase(datos):
     if not datos:
-        print("⚠️ No hay datos para subir. Revisar filtros.")
+        print("⚠️ No hay datos para subir. Revisar los filtros.")
         return
 
-    print(f"🚀 Subiendo {len(datos)} países limpios...")
-    
-    # Limpiamos para no duplicar
+    print(f"🚀 Subiendo {len(datos)} países a Supabase...")
     supabase.table("socios_comerciales").delete().neq("id", 0).execute()
-
-    # Insertamos
     supabase.table("socios_comerciales").insert(datos).execute()
     print("✅ ¡Sincronización completada!")
 
