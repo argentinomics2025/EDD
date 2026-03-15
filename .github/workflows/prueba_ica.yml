@@ -1,25 +1,26 @@
 name: 🌎 Probar Bot ICA
 
 on:
-  workflow_dispatch: # Esto crea el botón manual en GitHub
+  workflow_dispatch: # Botón manual en la pestaña Actions
 
 jobs:
   correr-bot:
     runs-on: ubuntu-latest
     steps:
-      - name: Traer el código
+      - name: Traer el código del repositorio
         uses: actions/checkout@v4
 
-      - name: Instalar Python
+      - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Instalar librerías
-        run: pip install -r requirements.txt
+      - name: Instalar librerías necesarias
+        run: |
+          pip install pandas requests supabase xlrd openpyxl
 
-      - name: Ejecutar el bot
-       env:
-             SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-             SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-           run: python scripts/bot_ica.py
+      - name: Ejecutar el script de Python
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python scripts/bot_ica.py
