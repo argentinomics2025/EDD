@@ -19,17 +19,18 @@ def obtener_datos_ica():
     xl = pd.ExcelFile(BytesIO(response.content), engine='xlrd')
     pestana_correcta = None
     
-    print("🕵️ Buscando la tabla detallada de países...")
-    # Buscamos una pestaña que tenga estos tres países, garantizando que es la lista completa
+    print("🕵️ Buscando estrictamente la columna de países...")
     for sheet in xl.sheet_names:
-        df_temp = pd.read_excel(BytesIO(response.content), sheet_name=sheet, skiprows=5, nrows=30, engine='xlrd')
-        texto_tabla = df_temp.astype(str).to_string().lower()
-        if 'brasil' in texto_tabla and 'chile' in texto_tabla and 'india' in texto_tabla:
-            pestana_correcta = sheet
-            break
+        df_temp = pd.read_excel(BytesIO(response.content), sheet_name=sheet, skiprows=5, nrows=50, engine='xlrd')
+        if not df_temp.empty and len(df_temp.columns) > 0:
+            # Miramos SOLO la primera columna, buscando a 'Brasil'
+            columna_cero = df_temp.iloc[:, 0].astype(str).str.strip().str.lower()
+            if 'brasil' in columna_cero.values:
+                pestana_correcta = sheet
+                break
 
     if not pestana_correcta:
-        print("❌ No se encontró la pestaña con la lista larga de países.")
+        print("❌ No se encontró la pestaña. Estas son las que hay:", xl.sheet_names)
         return []
 
     print(f"✅ ¡Pestaña correcta encontrada!: {pestana_correcta}")
@@ -54,14 +55,16 @@ def obtener_datos_ica():
     df = df[~df['pais'].str.startswith("(", na=False)]
     df = df[(df['pais'].str.len() > 2) & (df['pais'].str.len() < 30)]
 
-    # --- TRADUCTOR DE NÚMEROS ARGENTINOS A PYTHON ---
+    # --- TRADUCTOR DE NÚMEROS (Mejorado) ---
     for col in ['exportaciones', 'importaciones', 'saldo_comercial']:
-        # Quitamos puntos de miles y cambiamos comas por puntos decimales
-        df[col] = df[col].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+        # Solo aplicamos la corrección de comas si la columna es de texto
+        if df[col].dtype == 'object':
+            df[col] = df[col].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-    # Filtramos filas vacías y las famosas siglas
+    # Filtramos filas vacías
     df = df[df['exportaciones'] + df['importaciones'] > 0]
+    # Borramos siglas por las dudas
     df = df[~df['pais'].isin(["MOI", "MOA", "PP", "CyE"])]
 
     df['fecha_informe'] = "Febrero 2026"
