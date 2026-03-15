@@ -4,52 +4,68 @@ import requests
 from supabase import create_client, Client
 from io import BytesIO
 
-# Configuración de Supabase
+# 1. Configuración de Supabase
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+# Inicializamos el cliente aquí afuera para que lo usen todas las funciones
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def obtener_datos_ica():
     print("🔍 Iniciando descarga desde el INDEC...")
-    
-    # URL del Excel de Febrero 2026
     excel_url = "https://www.indec.gob.ar/ftp/cuadros/economia/ica_cuadros_19_02_26.xls"
 
     headers = {'User-Agent': 'Mozilla/5.0'}
     response = requests.get(excel_url, headers=headers)
     response.raise_for_status()
 
-    print("✅ Archivo recibido. Analizando columnas...")
+    print("✅ Archivo recibido. Analizando pestañas...")
     
-    # Leemos el Cuadro 11 (Socios Comerciales)
-    # Saltamos las primeras filas de títulos (ajustado a 7 para llegar a las cabeceras)
-    df = pd.read_excel(BytesIO(response.content), sheet_name='Cuadro 11', skiprows=7, engine='xlrd')
+    # Abrimos el archivo para ver los nombres reales de las pestañas
+    xl = pd.ExcelFile(BytesIO(response.content), engine='xlrd')
+    nombres_pestanas = xl.sheet_names
+    
+    # Buscamos la pestaña que diga "11" o "socio" (para evitar el error de 'Worksheet not found')
+    pestana_objetivo = next((p for p in nombres_pestanas if "11" in p or "socio" in p.lower()), None)
+    
+    if not pestana_objetivo:
+        pestana_objetivo = nombres_pestanas[10] # Plan B: la pestaña número 11
 
-    # Limpiamos nombres de columnas (eliminamos espacios y saltos de línea)
-    df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
-
-    # Renombramos por posición para no fallar si cambian una palabra
-    df = df.iloc[:, [0, 1, 2, 3]] # Tomamos las primeras 4 columnas
+    print(f"📊 Leyendo la pestaña: {pestana_objetivo}")
+    
+    # Leemos y limpiamos
+    df = pd.read_excel(BytesIO(response.content), sheet_name=pestana_objetivo, skiprows=7, engine='xlrd')
+    df = df.iloc[:, [0, 1, 2, 3]] 
     df.columns = ['pais', 'exportaciones', 'importaciones', 'saldo_comercial']
 
-    # Filtramos: quitamos filas vacías y el total general
+    # Filtramos filas vacías y notas al pie
     df = df.dropna(subset=['pais'])
-    df = df[~df['pais'].str.contains("Total", na=False, case=False)]
+    df = df[~df['pais'].astype(str).str.contains("Total|Variación|Fuente|Notas", na=False, case=False)]
 
-    datos_limpios = df.to_dict(orient='records')
-    return datos_limpios
+    # Aseguramos que los números sean números y no texto
+    for col in ['exportaciones', 'importaciones', 'saldo_comercial']:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+    # Agregamos la fecha del informe para que quede registro en la tabla
+    df['fecha_informe'] = "Febrero 2026"
+
+    return df.to_dict(orient='records')
+
+def subir_a_supabase(datos):
+    print(f"🚀 Subiendo {len(datos)} registros a la tabla 'socios_comerciales'...")
+    # Enviamos todo el paquete de datos a Supabase
+    response = supabase.table("socios_comerciales").insert(datos).execute()
+    print("✅ ¡Sincronización con Supabase completada!")
 
 if __name__ == "__main__":
     try:
         resultado = obtener_datos_ica()
         
-        print("\n--- RESULTADOS ENCONTRADOS ---")
-        for fila in resultado[:10]: # Mostramos los primeros 10 socios
-            print(f"País: {fila['pais']} | Exp: {fila['exportaciones']} | Imp: {fila['importaciones']}")
-        print("------------------------------")
-        print(f"Total de registros procesados: {len(resultado)}")
-        
-        # IMPORTANTE: La subida a Supabase está desactivada hasta que crees la tabla
-        # subir_a_supabase(resultado)
-        
+        if resultado:
+            print(f"🌍 Primer socio detectado: {resultado[0]['pais']}")
+            # AHORA SÍ: Ejecutamos la subida
+            subir_a_supabase(resultado)
+        else:
+            print("⚠️ No se encontraron datos para subir.")
+            
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error crítico: {e}")
