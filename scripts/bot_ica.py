@@ -17,43 +17,39 @@ def obtener_datos_ica():
     response = requests.get(excel_url, headers=headers)
     response.raise_for_status()
 
-    # Leemos el archivo buscando la pestaña correcta
     xl = pd.ExcelFile(BytesIO(response.content), engine='xlrd')
-    pestana = next((p for p in xl.sheet_names if "11" in p or "socio" in p.lower()), xl.sheet_names[10])
+    # Buscamos la pestaña c11 que ya vimos que existe
+    pestana = "c11" if "c11" in xl.sheet_names else xl.sheet_names[10]
     
     print(f"📊 Procesando pestaña: {pestana}")
+    # Saltamos 7 filas para caer justo en los datos
     df = pd.read_excel(BytesIO(response.content), sheet_name=pestana, skiprows=7, engine='xlrd')
     
-    # Seleccionamos columnas básicas
+    # Nos quedamos con las primeras 4 columnas
     df = df.iloc[:, [0, 1, 2, 3]] 
     df.columns = ['pais', 'exportaciones', 'importaciones', 'saldo_comercial']
 
-    # --- LIMPIEZA QUIRÚRGICA ---
-    # 1. Quitamos nulos y espacios
+    # --- LIMPIEZA ---
     df = df.dropna(subset=['pais'])
     df['pais'] = df['pais'].astype(str).str.strip()
 
-    # 2. LISTA NEGRA: Si el texto contiene alguna de estas palabras, se ELIMINA la fila
-    # Agregamos los rubros (MOI, MOA, PP, CyE) y las notas del INDEC (1), (2), ARCA, etc.
-    basura = [
-        "Total", "Variación", "Fuente", "Notas", "MOI", "MOA", "PP", "CyE", 
-        "Combustibles", "Manufacturas", "Productos", "Dato estimado", 
-        "Resolución", "ARCA", "Rotterdam", "puerto", "(1)", "(2)", "así como"
-    ]
+    # Filtro simple por palabras clave (sin caracteres raros que rompan el código)
+    basura = ["Total", "Variación", "Fuente", "Notas", "MOI", "MOA", "PP", "CyE", "Combustibles", "Dato estimado"]
     
-    regex_basura = '|'.join(basura)
-    df = df[~df['pais'].str.contains(regex_basura, na=False, case=False)]
+    for palabra in basura:
+        df = df[~df['pais'].str.contains(palabra, na=False, case=False)]
 
-    # 3. Filtro extra: Los países reales no suelen tener más de 40 caracteres en este Excel
-    # Esto vuela los párrafos de notas aclaratorias que quedaron
-    df = df[df['pais'].str.len() < 40]
-    
-    # 4. Los países reales tienen al menos 4 letras (excepto casos raros, pero limpia siglas)
+    # Filtro por longitud: Los párrafos largos de notas al pie se van
+    df = df[df['pais'].str.len() < 50]
+    # Los países reales tienen nombre, no son solo siglas de 2 o 3 letras (excepto USA, pero acá dice Estados Unidos)
     df = df[df['pais'].str.len() > 3]
 
-    # Convertimos números
+    # Convertimos a números
     for col in ['exportaciones', 'importaciones', 'saldo_comercial']:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+    # Solo nos quedamos con filas donde haya algún movimiento de plata (evita filas vacías residuales)
+    df = df[df['exportaciones'] + df['importaciones'] > 0]
 
     df['fecha_informe'] = "Febrero 2026"
     
@@ -61,15 +57,15 @@ def obtener_datos_ica():
 
 def subir_a_supabase(datos):
     if not datos:
-        print("⚠️ No hay datos para subir.")
+        print("⚠️ No hay datos para subir. Revisar filtros.")
         return
 
-    print(f"🚀 Limpiando tabla y subiendo {len(datos)} países...")
+    print(f"🚀 Subiendo {len(datos)} países limpios...")
     
-    # OPCIONAL: Borramos lo anterior para que no se duplique lo que ya cargamos mal
+    # Limpiamos para no duplicar
     supabase.table("socios_comerciales").delete().neq("id", 0).execute()
 
-    # Subimos los nuevos datos limpios
+    # Insertamos
     supabase.table("socios_comerciales").insert(datos).execute()
     print("✅ ¡Sincronización completada!")
 
