@@ -10,7 +10,7 @@ from io import BytesIO
 MES_INFORME = "Febrero 2026"
 EXCEL_URL = "https://www.indec.gob.ar/ftp/cuadros/economia/ica_cuadros_19_02_26.xls"
 
-# Nombres exactos de las pestañas para los detalles (Cambiar si el INDEC los mueve)
+# Nombres exactos de las pestañas para los detalles
 PESTANA_EXPO_RUBROS = "c11"
 PESTANA_IMPO_RUBROS = "c13"
 # ==========================================
@@ -25,6 +25,22 @@ def descargar_excel():
     response = requests.get(EXCEL_URL, headers=headers)
     response.raise_for_status()
     return BytesIO(response.content)
+
+# 🛡️ SUPER LIMPIADOR DE NÚMEROS
+def limpiar_numero(val):
+    if pd.isna(val):
+        return 0.0
+    if isinstance(val, str):
+        val = val.replace('.', '').replace(',', '.')
+    try:
+        num = float(val)
+        # Si el número es gigante (mayor a 100 mil), es porque está en dólares absolutos.
+        # Lo dividimos para que SIEMPRE quede estandarizado en Millones de USD.
+        if num > 100000:
+            num = num / 1000000.0
+        return round(num, 2)
+    except ValueError:
+        return 0.0
 
 def obtener_totales_ica(excel_bytes):
     xl = pd.ExcelFile(excel_bytes, engine='xlrd')
@@ -46,6 +62,10 @@ def obtener_totales_ica(excel_bytes):
     df = pd.read_excel(excel_bytes, sheet_name=pestana_correcta, skiprows=7, engine='xlrd')
     
     # CORRECCIÓN VITAL: Columna A (País), B (Expo), D (Impo)
+    if len(df.columns) < 4:
+        print("❌ Pestaña con formato incorrecto.")
+        return []
+        
     df = df.iloc[:, [0, 1, 3]] 
     df.columns = ['pais', 'exportaciones', 'importaciones']
 
@@ -59,16 +79,15 @@ def obtener_totales_ica(excel_bytes):
     df = df[~df['pais'].str.startswith("(", na=False)]
     df = df[(df['pais'].str.len() > 2) & (df['pais'].str.len() < 30)]
 
-    for col in ['exportaciones', 'importaciones']:
-        if df[col].dtype == 'object':
-            df[col] = df[col].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    # APLICAMOS EL BLINDAJE MATEMÁTICO
+    df['exportaciones'] = df['exportaciones'].apply(limpiar_numero)
+    df['importaciones'] = df['importaciones'].apply(limpiar_numero)
 
     df = df[df['exportaciones'] + df['importaciones'] > 0]
     df = df[~df['pais'].isin(["MOI", "MOA", "PP", "CyE"])]
 
-    # CALCULAMOS EL SALDO MATEMÁTICAMENTE PARA NO ERRARLE DE COLUMNA
-    df['saldo_comercial'] = df['exportaciones'] - df['importaciones']
+    # CALCULAMOS EL SALDO MATEMÁTICAMENTE PARA NO ERRARLE
+    df['saldo_comercial'] = round(df['exportaciones'] - df['importaciones'], 2)
     df['fecha_informe'] = MES_INFORME
     
     return df.to_dict(orient='records')
@@ -76,7 +95,6 @@ def obtener_totales_ica(excel_bytes):
 def obtener_detalles_rubros(excel_bytes, sheet_name, tipo_flujo):
     print(f"📦 Extrayendo rubros de {tipo_flujo} (Pestaña: {sheet_name})...")
     try:
-        # Usamos skiprows=6 para saltear los títulos generales del INDEC
         df = pd.read_excel(excel_bytes, sheet_name=sheet_name, skiprows=6, engine='xlrd')
         
         # Columna C (2) = Producto, D (3) = Monto, G (6) = País
@@ -87,17 +105,13 @@ def obtener_detalles_rubros(excel_bytes, sheet_name, tipo_flujo):
         df = df.iloc[:, [2, 3, 6]]
         df.columns = ['rubro', 'valor_usd', 'pais']
         
-        # Limpieza básica
         df = df.dropna(subset=['pais', 'rubro'])
         df['pais'] = df['pais'].astype(str).str.strip()
         df['rubro'] = df['rubro'].astype(str).str.strip()
         
-        # Arreglar números
-        if df['valor_usd'].dtype == 'object':
-            df['valor_usd'] = df['valor_usd'].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-        df['valor_usd'] = pd.to_numeric(df['valor_usd'], errors='coerce').fillna(0)
+        # APLICAMOS EL BLINDAJE MATEMÁTICO TAMBIÉN ACÁ
+        df['valor_usd'] = df['valor_usd'].apply(limpiar_numero)
         
-        # Filtros para sacar basura y filas vacías
         df = df[df['valor_usd'] > 0]
         df = df[df['pais'].str.len() > 2]
         
@@ -127,7 +141,6 @@ def subir_rubros_a_supabase(datos):
         return
     mes_actual = datos[0]['fecha_informe']
     print(f"🚀 Subiendo {len(datos)} RUBROS DETALLADOS a Supabase para {mes_actual}...")
-    # Borramos solo los rubros de este mes para no duplicar ni borrar historia
     supabase.table("socios_rubros").delete().eq("fecha_informe", mes_actual).execute()
     supabase.table("socios_rubros").insert(datos).execute()
 
@@ -135,15 +148,11 @@ if __name__ == "__main__":
     try:
         archivo_excel = descargar_excel()
         
-        # 1. Procesar y subir Totales (con tu corrección de columnas aplicada)
         totales = obtener_totales_ica(archivo_excel)
         subir_totales_a_supabase(totales)
         
-        # 2. Procesar y subir Detalles por Rubro (Pestañas c11 y c13)
         rubros_expo = obtener_detalles_rubros(archivo_excel, PESTANA_EXPO_RUBROS, 'Exportacion')
         rubros_impo = obtener_detalles_rubros(archivo_excel, PESTANA_IMPO_RUBROS, 'Importacion')
-        
-        # Juntamos expo e impo y subimos todo junto
         todos_los_rubros = rubros_expo + rubros_impo
         subir_rubros_a_supabase(todos_los_rubros)
         
