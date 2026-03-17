@@ -78,7 +78,7 @@ def detectar_pestanas_por_titulo(excel_bytes):
 
     return pestanas
 
-# ⚔️ DIVIDIR Y CONQUISTAR (Totales)
+# ⚔️ DIVIDIR Y CONQUISTAR (Totales por País)
 def obtener_totales_ica(excel_bytes, sheet_name):
     if not sheet_name:
         print("❌ No se encontró la pestaña de totales para procesar.")
@@ -100,7 +100,7 @@ def obtener_totales_ica(excel_bytes, sheet_name):
     df_impo = df.iloc[:, [4, 5]].copy()
     df_impo.columns = ['pais', 'importaciones']
 
-    # Función interna para limpiar cada lado por separado (CON EL .COPY() AGREGADO)
+    # Función interna para limpiar cada lado por separado
     def limpiar_mitad(df_mitad, col_valor):
         df_mitad = df_mitad.dropna(subset=['pais']).copy()
         df_mitad['pais'] = df_mitad['pais'].astype(str).str.strip()
@@ -131,36 +131,37 @@ def obtener_totales_ica(excel_bytes, sheet_name):
     
     return df_final.to_dict(orient='records')
 
-# 📦 DETALLES POR RUBROS
-def obtener_detalles_rubros(excel_bytes, sheet_name, tipo_flujo):
+
+# 📦 TOTALES GLOBALES POR RUBRO (NUEVO: Solo agarra las Columnas A y B)
+def obtener_totales_por_rubro(excel_bytes, sheet_name, tipo_flujo):
     if not sheet_name:
         print(f"❌ No se encontró la pestaña para procesar {tipo_flujo}.")
         return []
         
-    print(f"📦 Extrayendo rubros de {tipo_flujo} (Pestaña: {sheet_name})...")
+    print(f"📦 Extrayendo Totales por Rubro de {tipo_flujo} (Pestaña: {sheet_name})...")
     try:
+        # skiprows=6 suele esquivar los títulos principales del INDEC
         df = pd.read_excel(excel_bytes, sheet_name=sheet_name, skiprows=6, engine='xlrd')
         
-        # Columna C (2) = Producto, D (3) = Monto, G (6) = País
-        if len(df.columns) <= 6:
-            print(f"⚠️ La pestaña {sheet_name} no tiene suficientes columnas.")
+        # MAGIA ACÁ: Solo agarramos Columna A (índice 0) y Columna B (índice 1)
+        if len(df.columns) < 2:
             return []
             
-        df = df.iloc[:, [2, 3, 6]]
-        df.columns = ['rubro', 'valor_usd', 'pais']
+        df = df.iloc[:, [0, 1]].copy()
+        df.columns = ['rubro', 'valor_usd']
         
-        df = df.dropna(subset=['pais', 'rubro'])
-        df['pais'] = df['pais'].astype(str).str.strip()
+        # Limpieza de textos vacíos
+        df = df.dropna(subset=['rubro', 'valor_usd'])
         df['rubro'] = df['rubro'].astype(str).str.strip()
         
+        # Limpieza de números con nuestra función blindada
         df['valor_usd'] = df['valor_usd'].apply(limpiar_numero)
         
+        # Volamos filas que no tienen plata o son basura del INDEC
         df = df[df['valor_usd'] > 0]
-        df = df[df['pais'].str.len() > 2]
         
-        basura = ["total", "fuente", "nota", "s/d"]
+        basura = ["total", "fuente", "nota", "s/d", "selección", "países"]
         for b in basura:
-            df = df[~df['pais'].str.lower().str.contains(b, na=False)]
             df = df[~df['rubro'].str.lower().str.contains(b, na=False)]
             
         df['tipo_flujo'] = tipo_flujo
@@ -170,6 +171,7 @@ def obtener_detalles_rubros(excel_bytes, sheet_name, tipo_flujo):
     except Exception as e:
         print(f"❌ Error procesando pestaña {sheet_name}: {e}")
         return []
+
 
 # 🚀 FUNCIONES DE SUBIDA A SUPABASE
 def subir_totales_a_supabase(datos):
@@ -181,14 +183,15 @@ def subir_totales_a_supabase(datos):
     supabase.table("socios_comerciales").delete().eq("fecha_informe", mes_actual).execute()
     supabase.table("socios_comerciales").insert(datos).execute()
 
-def subir_rubros_a_supabase(datos):
+# NUEVA FUNCIÓN A LA NUEVA TABLA COMEX_RUBROS
+def subir_comex_rubros_a_supabase(datos):
     if not datos:
         print("⚠️ No hay datos de Rubros para subir.")
         return
     mes_actual = datos[0]['fecha_informe']
-    print(f"🚀 Subiendo {len(datos)} RUBROS DETALLADOS a Supabase para {mes_actual}...")
-    supabase.table("socios_rubros").delete().eq("fecha_informe", mes_actual).execute()
-    supabase.table("socios_rubros").insert(datos).execute()
+    print(f"🚀 Subiendo {len(datos)} TOTALES POR RUBRO a Supabase para {mes_actual}...")
+    supabase.table("comex_rubros").delete().eq("fecha_informe", mes_actual).execute()
+    supabase.table("comex_rubros").insert(datos).execute()
 
 # ==========================================
 # 🎬 MOTOR PRINCIPAL
@@ -200,16 +203,16 @@ if __name__ == "__main__":
         # 1. El sabueso rastrea las pestañas
         mapa_pestanas = detectar_pestanas_por_titulo(archivo_excel)
         
-        # 2. Procesamos Totales (con el cruce de columnas inteligente)
+        # 2. Procesamos Totales por País
         totales = obtener_totales_ica(archivo_excel, mapa_pestanas['totales'])
         subir_totales_a_supabase(totales)
         
-        # 3. Procesamos Detalles (Expo e Impo)
-        rubros_expo = obtener_detalles_rubros(archivo_excel, mapa_pestanas['expo_rubros'], 'Exportacion')
-        rubros_impo = obtener_detalles_rubros(archivo_excel, mapa_pestanas['impo_rubros'], 'Importacion')
+        # 3. Procesamos Totales Globales por Rubro/Subrubro (NUEVO)
+        totales_rubros_expo = obtener_totales_por_rubro(archivo_excel, mapa_pestanas['expo_rubros'], 'Exportacion')
+        totales_rubros_impo = obtener_totales_por_rubro(archivo_excel, mapa_pestanas['impo_rubros'], 'Importacion')
         
-        todos_los_rubros = rubros_expo + rubros_impo
-        subir_rubros_a_supabase(todos_los_rubros)
+        todos_los_rubros = totales_rubros_expo + totales_rubros_impo
+        subir_comex_rubros_a_supabase(todos_los_rubros)
         
         print("✅✅ ¡Sincronización TOTAL completada con éxito! ✅✅")
         
