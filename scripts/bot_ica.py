@@ -41,51 +41,32 @@ def limpiar_numero(val):
     except ValueError:
         return 0.0
 
-# 🐕‍𦦙 EL SABUESO: ENCUENTRA LAS PESTAÑAS POR SU TÍTULO
-def detectar_pestanas_por_titulo(excel_bytes):
-    print("🐕‍𦦙 Rastreando las pestañas correctas según sus títulos...")
+# 🐕‍𦦙 EL SABUESO: ENCUENTRA SOLO LA PESTAÑA DE TOTALES
+def detectar_pestana_totales(excel_bytes):
+    print("🐕‍𦦙 Rastreando la pestaña de Totales por País...")
     xl = pd.ExcelFile(excel_bytes, engine='xlrd')
     
-    pestanas = {
-        'totales': None,
-        'expo_rubros': None,
-        'impo_rubros': None
-    }
-    
     for sheet in xl.sheet_names:
-        # Leemos solo las primeras 15 filas para buscar el título
         df_temp = pd.read_excel(excel_bytes, sheet_name=sheet, nrows=15, header=None, engine='xlrd')
         if df_temp.empty:
             continue
             
-        # Convertimos todas las celdas a texto minúsculo para buscar más fácil
         texto_hoja = df_temp.astype(str).apply(lambda x: ' '.join(x), axis=1).str.lower().str.cat(sep=' ')
         
-        # 1. Buscamos Totales
+        # Buscamos el título exacto del cuadro
         if "según exportaciones, importaciones, saldo e intercambio" in texto_hoja and "principales países" in texto_hoja:
-            pestanas['totales'] = sheet
-            print(f"   ✅ Totales encontrados en pestaña: {sheet}")
+            print(f"   ✅ Pestaña correcta encontrada: {sheet}")
+            return sheet
             
-        # 2. Buscamos Detalles Expo
-        elif "exportaciones por grandes rubros" in texto_hoja and "países seleccionados" in texto_hoja:
-            pestanas['expo_rubros'] = sheet
-            print(f"   ✅ Expo Detalle encontrada en pestaña: {sheet}")
-            
-        # 3. Buscamos Detalles Impo
-        elif "importaciones por usos económicos" in texto_hoja and "países seleccionados" in texto_hoja:
-            pestanas['impo_rubros'] = sheet
-            print(f"   ✅ Impo Detalle encontrada en pestaña: {sheet}")
+    return None
 
-    return pestanas
-
-# ⚔️ DIVIDIR Y CONQUISTAR (Totales por País)
+# ⚔️ DIVIDIR Y CONQUISTAR
 def obtener_totales_ica(excel_bytes, sheet_name):
     if not sheet_name:
         print("❌ No se encontró la pestaña de totales para procesar.")
         return []
         
-    print(f"📊 Procesando totales desde {sheet_name} (Dividiendo Expo e Impo)...")
-    # skiprows=7 suele ser donde empiezan los datos reales de esta tabla
+    print(f"📊 Extrayendo columnas de Expo (A,B) e Impo (E,F)...")
     df = pd.read_excel(excel_bytes, sheet_name=sheet_name, skiprows=7, engine='xlrd')
     
     if len(df.columns) < 6:
@@ -105,6 +86,7 @@ def obtener_totales_ica(excel_bytes, sheet_name):
         df_mitad = df_mitad.dropna(subset=['pais']).copy()
         df_mitad['pais'] = df_mitad['pais'].astype(str).str.strip()
 
+        # Limpiamos palabras que no son países
         basura = ["Total", "Fuente", "Notas", "Dato estimado", "Resto", "Mercosur", "Unión Europea", "ASEAN", "Magreb", "USMCA"]
         for palabra in basura:
             df_mitad = df_mitad[~df_mitad['pais'].str.contains(palabra, na=False, case=False)]
@@ -120,9 +102,10 @@ def obtener_totales_ica(excel_bytes, sheet_name):
     df_impo_limpio = limpiar_mitad(df_impo, 'importaciones')
 
     # 3. FUSIONAMOS LAS DOS LISTAS USANDO EL PAÍS COMO LLAVE (Outer Join)
+    # Esto asegura que si a China le exportamos pero no importamos (o viceversa), no se rompa
     df_final = pd.merge(df_expo_limpio, df_impo_limpio, on='pais', how='outer').fillna(0)
 
-    # Sacamos acrónimos generales por las dudas
+    # Sacamos acrónimos generales
     df_final = df_final[~df_final['pais'].isin(["MOI", "MOA", "PP", "CyE"])]
 
     # 4. CALCULAMOS EL SALDO MATEMÁTICO REAL
@@ -131,90 +114,38 @@ def obtener_totales_ica(excel_bytes, sheet_name):
     
     return df_final.to_dict(orient='records')
 
-
-# 📦 TOTALES GLOBALES POR RUBRO (NUEVO: Solo agarra las Columnas A y B)
-def obtener_totales_por_rubro(excel_bytes, sheet_name, tipo_flujo):
-    if not sheet_name:
-        print(f"❌ No se encontró la pestaña para procesar {tipo_flujo}.")
-        return []
-        
-    print(f"📦 Extrayendo Totales por Rubro de {tipo_flujo} (Pestaña: {sheet_name})...")
-    try:
-        # skiprows=6 suele esquivar los títulos principales del INDEC
-        df = pd.read_excel(excel_bytes, sheet_name=sheet_name, skiprows=6, engine='xlrd')
-        
-        # MAGIA ACÁ: Solo agarramos Columna A (índice 0) y Columna B (índice 1)
-        if len(df.columns) < 2:
-            return []
-            
-        df = df.iloc[:, [0, 1]].copy()
-        df.columns = ['rubro', 'valor_usd']
-        
-        # Limpieza de textos vacíos
-        df = df.dropna(subset=['rubro', 'valor_usd'])
-        df['rubro'] = df['rubro'].astype(str).str.strip()
-        
-        # Limpieza de números con nuestra función blindada
-        df['valor_usd'] = df['valor_usd'].apply(limpiar_numero)
-        
-        # Volamos filas que no tienen plata o son basura del INDEC
-        df = df[df['valor_usd'] > 0]
-        
-        basura = ["total", "fuente", "nota", "s/d", "selección", "países"]
-        for b in basura:
-            df = df[~df['rubro'].str.lower().str.contains(b, na=False)]
-            
-        df['tipo_flujo'] = tipo_flujo
-        df['fecha_informe'] = MES_INFORME
-        
-        return df.to_dict(orient='records')
-    except Exception as e:
-        print(f"❌ Error procesando pestaña {sheet_name}: {e}")
-        return []
-
-
-# 🚀 FUNCIONES DE SUBIDA A SUPABASE
+# 🚀 FUNCIÓN DE SUBIDA A SUPABASE
 def subir_totales_a_supabase(datos):
     if not datos:
         print("⚠️ No hay datos de Totales para subir.")
         return
-    mes_actual = datos[0]['fecha_informe']
-    print(f"🚀 Subiendo {len(datos)} TOTALES a Supabase para {mes_actual}...")
-    supabase.table("socios_comerciales").delete().eq("fecha_informe", mes_actual).execute()
+        
+    print(f"🚀 Subiendo {len(datos)} PAÍSES a Supabase para {MES_INFORME}...")
+    
+    # Borramos los datos de ese mes por si estamos corriendo el script por segunda vez
+    supabase.table("socios_comerciales").delete().eq("fecha_informe", MES_INFORME).execute()
+    
+    # Insertamos los nuevos
     supabase.table("socios_comerciales").insert(datos).execute()
-
-# NUEVA FUNCIÓN A LA NUEVA TABLA COMEX_RUBROS
-def subir_comex_rubros_a_supabase(datos):
-    if not datos:
-        print("⚠️ No hay datos de Rubros para subir.")
-        return
-    mes_actual = datos[0]['fecha_informe']
-    print(f"🚀 Subiendo {len(datos)} TOTALES POR RUBRO a Supabase para {mes_actual}...")
-    supabase.table("comex_rubros").delete().eq("fecha_informe", mes_actual).execute()
-    supabase.table("comex_rubros").insert(datos).execute()
 
 # ==========================================
 # 🎬 MOTOR PRINCIPAL
 # ==========================================
 if __name__ == "__main__":
     try:
+        # 1. Descargamos
         archivo_excel = descargar_excel()
         
-        # 1. El sabueso rastrea las pestañas
-        mapa_pestanas = detectar_pestanas_por_titulo(archivo_excel)
+        # 2. Buscamos la pestaña
+        pestana_correcta = detectar_pestana_totales(archivo_excel)
         
-        # 2. Procesamos Totales por País
-        totales = obtener_totales_ica(archivo_excel, mapa_pestanas['totales'])
+        # 3. Procesamos
+        totales = obtener_totales_ica(archivo_excel, pestana_correcta)
+        
+        # 4. Subimos
         subir_totales_a_supabase(totales)
         
-        # 3. Procesamos Totales Globales por Rubro/Subrubro (NUEVO)
-        totales_rubros_expo = obtener_totales_por_rubro(archivo_excel, mapa_pestanas['expo_rubros'], 'Exportacion')
-        totales_rubros_impo = obtener_totales_por_rubro(archivo_excel, mapa_pestanas['impo_rubros'], 'Importacion')
-        
-        todos_los_rubros = totales_rubros_expo + totales_rubros_impo
-        subir_comex_rubros_a_supabase(todos_los_rubros)
-        
-        print("✅✅ ¡Sincronización TOTAL completada con éxito! ✅✅")
+        print("✅✅ ¡Base de datos de Socios Comerciales reseteada y actualizada con éxito! ✅✅")
         
     except Exception as e:
         print(f"❌ Error crítico general: {e}")
