@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import requests
+import re
 from supabase import create_client, Client
 from io import BytesIO
 
@@ -26,22 +27,41 @@ def descargar_excel():
     response.raise_for_status()
     return BytesIO(response.content)
 
-# 🛡️ SUPER LIMPIADOR DE NÚMEROS
+# 🛡️ SUPER LIMPIADOR DE NÚMEROS (VERSIÓN BLINDADA)
 def limpiar_numero(val):
     if pd.isna(val):
         return 0.0
+        
+    # Si ya es un número de Python, lo usamos directo
+    if isinstance(val, (int, float)):
+        num = float(val)
+        if num > 100000:
+            num = num / 1000000.0
+        return round(num, 2)
+        
+    # Si es texto (ej: "1 436,02", "s/d", "-")
     if isinstance(val, str):
+        val = val.strip()
+        if val in ['-', 's/d', '', ' ']:
+            return 0.0
+            
+        # Matamos espacios normales y espacios fantasmas (\xa0)
+        val = val.replace(' ', '').replace('\xa0', '')
+        # Formato INDEC: 1.436,02 -> 1436.02
         val = val.replace('.', '').replace(',', '.')
+        
+        # Por si quedó alguna letra o símbolo suelto, lo pulverizamos
+        val = re.sub(r'[^\d.]', '', val)
+        
     try:
         num = float(val)
-        # Si el número es gigante, lo pasamos a Millones de USD
         if num > 100000:
             num = num / 1000000.0
         return round(num, 2)
     except ValueError:
         return 0.0
 
-# 🐕‍𦦙 EL SABUESO: ENCUENTRA SOLO LA PESTAÑA DE TOTALES
+# 🐕‍𦦙 EL SABUESO
 def detectar_pestana_totales(excel_bytes):
     print("🐕‍𦦙 Rastreando la pestaña de Totales por País...")
     xl = pd.ExcelFile(excel_bytes, engine='xlrd')
@@ -53,7 +73,6 @@ def detectar_pestana_totales(excel_bytes):
             
         texto_hoja = df_temp.astype(str).apply(lambda x: ' '.join(x), axis=1).str.lower().str.cat(sep=' ')
         
-        # Buscamos el título exacto del cuadro
         if "según exportaciones, importaciones, saldo e intercambio" in texto_hoja and "principales países" in texto_hoja:
             print(f"   ✅ Pestaña correcta encontrada: {sheet}")
             return sheet
@@ -81,12 +100,15 @@ def obtener_totales_ica(excel_bytes, sheet_name):
     df_impo = df.iloc[:, [4, 5]].copy()
     df_impo.columns = ['pais', 'importaciones']
 
-    # Función interna para limpiar cada lado por separado
+    # Función interna con limpieza EXTREMA de nombres de países
     def limpiar_mitad(df_mitad, col_valor):
         df_mitad = df_mitad.dropna(subset=['pais']).copy()
-        df_mitad['pais'] = df_mitad['pais'].astype(str).str.strip()
+        df_mitad['pais'] = df_mitad['pais'].astype(str)
+        
+        # ELIMINAMOS NOTAS AL PIE: Transforma "China(1)" o "China*" en "China"
+        df_mitad['pais'] = df_mitad['pais'].apply(lambda x: re.sub(r'\(\d+\)', '', x))
+        df_mitad['pais'] = df_mitad['pais'].str.replace('*', '', regex=False).str.strip()
 
-        # Limpiamos palabras que no son países
         basura = ["Total", "Fuente", "Notas", "Dato estimado", "Resto", "Mercosur", "Unión Europea", "ASEAN", "Magreb", "USMCA"]
         for palabra in basura:
             df_mitad = df_mitad[~df_mitad['pais'].str.contains(palabra, na=False, case=False)]
@@ -101,8 +123,7 @@ def obtener_totales_ica(excel_bytes, sheet_name):
     df_expo_limpio = limpiar_mitad(df_expo, 'exportaciones')
     df_impo_limpio = limpiar_mitad(df_impo, 'importaciones')
 
-    # 3. FUSIONAMOS LAS DOS LISTAS USANDO EL PAÍS COMO LLAVE (Outer Join)
-    # Esto asegura que si a China le exportamos pero no importamos (o viceversa), no se rompa
+    # 3. FUSIONAMOS LAS DOS LISTAS USANDO EL PAÍS COMO LLAVE
     df_final = pd.merge(df_expo_limpio, df_impo_limpio, on='pais', how='outer').fillna(0)
 
     # Sacamos acrónimos generales
@@ -122,10 +143,7 @@ def subir_totales_a_supabase(datos):
         
     print(f"🚀 Subiendo {len(datos)} PAÍSES a Supabase para {MES_INFORME}...")
     
-    # Borramos los datos de ese mes por si estamos corriendo el script por segunda vez
     supabase.table("socios_comerciales").delete().eq("fecha_informe", MES_INFORME).execute()
-    
-    # Insertamos los nuevos
     supabase.table("socios_comerciales").insert(datos).execute()
 
 # ==========================================
@@ -133,19 +151,10 @@ def subir_totales_a_supabase(datos):
 # ==========================================
 if __name__ == "__main__":
     try:
-        # 1. Descargamos
         archivo_excel = descargar_excel()
-        
-        # 2. Buscamos la pestaña
         pestana_correcta = detectar_pestana_totales(archivo_excel)
-        
-        # 3. Procesamos
         totales = obtener_totales_ica(archivo_excel, pestana_correcta)
-        
-        # 4. Subimos
         subir_totales_a_supabase(totales)
-        
         print("✅✅ ¡Base de datos de Socios Comerciales reseteada y actualizada con éxito! ✅✅")
-        
     except Exception as e:
         print(f"❌ Error crítico general: {e}")
