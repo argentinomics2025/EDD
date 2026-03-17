@@ -68,13 +68,14 @@ def obtener_totales_ica(excel_bytes, sheet_name):
     if not sheet_name:
         return []
         
-    print(f"📊 Extrayendo columnas de Expo e Impo...")
-    df = pd.read_excel(excel_bytes, sheet_name=sheet_name, skiprows=7, engine='xlrd')
+    print(f"📊 Extrayendo columnas de Expo e Impo (Modo Anti-Títulos)...")
+    # MAGIA ACÁ: header=None evita que Pandas se coma a China como si fuera un título
+    df = pd.read_excel(excel_bytes, sheet_name=sheet_name, header=None, skiprows=5, engine='xlrd')
     
-    # IMPRIMIMOS LAS COLUMNAS CRUDAS PARA VER QUÉ LEE PANDAS
-    print(f"🔎 Columnas detectadas en Excel: {len(df.columns)}")
-    
-    # Por defecto probamos A=0, B=1, E=4, F=5
+    if len(df.columns) < 6:
+        print("❌ Pestaña con formato incorrecto. No hay suficientes columnas.")
+        return []
+        
     df_expo = df.iloc[:, [0, 1]].copy()
     df_expo.columns = ['pais', 'exportaciones']
     
@@ -85,10 +86,10 @@ def obtener_totales_ica(excel_bytes, sheet_name):
         df_mitad = df_mitad.dropna(subset=['pais']).copy()
         df_mitad['pais'] = df_mitad['pais'].astype(str)
         
-        # ⚔️ CORTE LETAL: Vuela todo después de paréntesis, asterisco o coma. Y lo pone en Mayúsculas iniciales.
         df_mitad['pais'] = df_mitad['pais'].apply(lambda x: x.split('(')[0].split('*')[0].split(',')[0].strip().title())
 
-        basura = ["Total", "Fuente", "Notas", "Dato Estimado", "Resto", "Mercosur", "Unión Europea", "Asean", "Magreb", "Usmca", "S/D"]
+        # Agregamos "Pais" y "País" a la basura para limpiar los títulos reales del Excel
+        basura = ["Total", "Fuente", "Notas", "Dato Estimado", "Resto", "Mercosur", "Unión Europea", "Asean", "Magreb", "Usmca", "S/D", "Pais", "País"]
         for palabra in basura:
             df_mitad = df_mitad[~df_mitad['pais'].str.contains(palabra, na=False, case=False)]
 
@@ -99,7 +100,6 @@ def obtener_totales_ica(excel_bytes, sheet_name):
     df_expo_limpio = limpiar_mitad(df_expo, 'exportaciones')
     df_impo_limpio = limpiar_mitad(df_impo, 'importaciones')
 
-    # 👀 DEBUG: MOSTRAR LOS PRIMEROS RESULTADOS EN PANTALLA
     print("\n--- 🕵️ DEBUG EXPO (Lado Izquierdo) ---")
     print(df_expo_limpio.head(5).to_string(index=False))
     print("--------------------------------------\n")
@@ -128,6 +128,6 @@ if __name__ == "__main__":
         pestana_correcta = detectar_pestana_totales(archivo_excel)
         totales = obtener_totales_ica(archivo_excel, pestana_correcta)
         subir_totales_a_supabase(totales)
-        print("✅✅ ¡Sincronización completada! Revisá los recuadros de DEBUG arriba. ✅✅")
+        print("✅✅ ¡Sincronización completada! China DEBE estar en el recuadro de IMPO ahora. ✅✅")
     except Exception as e:
         print(f"❌ Error crítico general: {e}")
