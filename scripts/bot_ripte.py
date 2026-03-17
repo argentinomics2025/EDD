@@ -57,18 +57,15 @@ def run():
                 if len(cols) >= 3:
                     mes_raw = cols[0].text.strip()
                     
-                    # Si la fila parece un mes válido (ej: Enero/2026)
                     if '/' in mes_raw:
-                        # Limpiamos los números argentinos ($ 1.646.344,54 -> 1646344.54)
-                        monto_raw = cols[1].text.strip().replace('$', '').replace('.', '').replace(',', '.').strip()
                         var_raw = cols[2].text.strip().replace('%', '').replace(',', '.').strip()
-                        
                         fecha_formateada = parsear_mes_anio(mes_raw)
-                        if fecha_formateada and monto_raw:
+                        
+                        if fecha_formateada:
                             try:
                                 paquete_final.append({
                                     "fecha": fecha_formateada,
-                                    "valor": float(monto_raw),
+                                    # Solo enviamos la variación mensual, que es lo que acepta tu tabla
                                     "var_ripte_mensual": float(var_raw) if var_raw else 0.0
                                 })
                             except ValueError:
@@ -77,7 +74,7 @@ def run():
             if paquete_final:
                 # La web los pone de más nuevo a más viejo. Los damos vuelta.
                 paquete_final = sorted(paquete_final, key=lambda x: x["fecha"])
-                paquete_reciente = paquete_final[-36:] # Agarramos los últimos 3 años nomás
+                paquete_reciente = paquete_final[-36:] # Últimos 3 años
                 
                 print("   💾 Guardando en base de datos (tabla: datos_salarios)...")
                 supabase.table('datos_salarios').upsert(
@@ -87,7 +84,7 @@ def run():
                 
                 print(f"✅ ¡Robot completado! Se actualizaron {len(paquete_reciente)} meses de la fuente oficial.")
                 ultimo_dato = paquete_reciente[-1]
-                print(f"   🌟 Último dato cargado: {ultimo_dato['fecha']} -> Variación: {ultimo_dato['var_ripte_mensual']}% (Sueldo: ${ultimo_dato['valor']})")
+                print(f"   🌟 Último dato cargado: {ultimo_dato['fecha']} -> Variación: {ultimo_dato['var_ripte_mensual']}%")
             else:
                 print("   ⚠️ No se pudieron extraer datos válidos de la tabla.")
         else:
