@@ -100,9 +100,9 @@ def obtener_totales_ica(excel_bytes, sheet_name):
     df_impo = df.iloc[:, [4, 5]].copy()
     df_impo.columns = ['pais', 'importaciones']
 
-    # Función interna para limpiar cada lado por separado
+    # Función interna para limpiar cada lado por separado (CON EL .COPY() AGREGADO)
     def limpiar_mitad(df_mitad, col_valor):
-        df_mitad = df_mitad.dropna(subset=['pais'])
+        df_mitad = df_mitad.dropna(subset=['pais']).copy()
         df_mitad['pais'] = df_mitad['pais'].astype(str).str.strip()
 
         basura = ["Total", "Fuente", "Notas", "Dato estimado", "Resto", "Mercosur", "Unión Europea", "ASEAN", "Magreb", "USMCA"]
