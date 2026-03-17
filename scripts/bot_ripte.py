@@ -65,7 +65,6 @@ def run():
                             try:
                                 paquete_final.append({
                                     "fecha": fecha_formateada,
-                                    # Solo enviamos la variación mensual, que es lo que acepta tu tabla
                                     "var_ripte_mensual": float(var_raw) if var_raw else 0.0
                                 })
                             except ValueError:
@@ -77,10 +76,15 @@ def run():
                 paquete_reciente = paquete_final[-36:] # Últimos 3 años
                 
                 print("   💾 Guardando en base de datos (tabla: datos_salarios)...")
-                supabase.table('datos_salarios').upsert(
-                    paquete_reciente, 
-                    on_conflict='fecha'
-                ).execute()
+                
+                # 1. Extraemos las fechas que vamos a subir
+                fechas_a_actualizar = [dato["fecha"] for dato in paquete_reciente]
+                
+                # 2. Borramos esos meses específicos para no crear duplicados
+                supabase.table('datos_salarios').delete().in_('fecha', fechas_a_actualizar).execute()
+                
+                # 3. Insertamos la data fresca
+                supabase.table('datos_salarios').insert(paquete_reciente).execute()
                 
                 print(f"✅ ¡Robot completado! Se actualizaron {len(paquete_reciente)} meses de la fuente oficial.")
                 ultimo_dato = paquete_reciente[-1]
