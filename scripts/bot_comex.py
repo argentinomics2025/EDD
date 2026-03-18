@@ -55,7 +55,7 @@ def actualizar_comex():
         df['fecha'] = pd.to_datetime(df['fecha']).dt.strftime('%Y-%m-%d')
         records_historicos = df.to_dict(orient='records')
 
-        # Datos recientes (Tu colchón de seguridad)
+        # Datos recientes (Tu colchón de seguridad - FEBRERO ELIMINADO POR CONSISTENCIA)
         datos_recientes = [
             {'fecha': '2024-09-01', 'exportaciones_usd_millions': 6934, 'importaciones_usd_millions': 5954, 'saldo_usd_millions': 980, 'expo_primarios': 1446, 'expo_moa': 2816, 'expo_moi': 1845, 'expo_energia': 827, 'impo_bienes_capital': 1020, 'impo_bienes_intermedios': 2100, 'impo_combustibles': 350, 'impo_piezas_accesorios': 1200, 'impo_bienes_consumo': 680, 'impo_vehiculos': 604},
             {'fecha': '2024-10-01', 'exportaciones_usd_millions': 6128, 'importaciones_usd_millions': 6010, 'saldo_usd_millions': 118, 'expo_primarios': 1029, 'expo_moa': 2398, 'expo_moi': 1888, 'expo_energia': 813, 'impo_bienes_capital': 1050, 'impo_bienes_intermedios': 2150, 'impo_combustibles': 400, 'impo_piezas_accesorios': 1250, 'impo_bienes_consumo': 600, 'impo_vehiculos': 560},
@@ -75,8 +75,7 @@ def actualizar_comex():
             {'fecha': '2025-11-01', 'exportaciones_usd_millions': 8096, 'importaciones_usd_millions': 5598, 'saldo_usd_millions': 2498, 'expo_primarios': 1550, 'expo_moa': 2950, 'expo_moi': 1900, 'expo_energia': 1696, 'impo_bienes_capital': 1000, 'impo_bienes_intermedios': 2000, 'impo_combustibles': 300, 'impo_piezas_accesorios': 1100, 'impo_bienes_consumo': 650, 'impo_vehiculos': 548},
             {'fecha': '2025-12-01', 'exportaciones_usd_millions': 7448, 'importaciones_usd_millions': 5556, 'saldo_usd_millions': 1892, 'expo_primarios': 1300, 'expo_moa': 2700, 'expo_moi': 1800, 'expo_energia': 1648, 'impo_bienes_capital': 950, 'impo_bienes_intermedios': 2000, 'impo_combustibles': 280, 'impo_piezas_accesorios': 1100, 'impo_bienes_consumo': 700, 'impo_vehiculos': 526},
             
-            {'fecha': '2026-01-01', 'exportaciones_usd_millions': 7057, 'importaciones_usd_millions': 5070, 'saldo_usd_millions': 1987, 'expo_primarios': 1200, 'expo_moa': 2500, 'expo_moi': 1700, 'expo_energia': 1657, 'impo_bienes_capital': 850, 'impo_bienes_intermedios': 1850, 'impo_combustibles': 250, 'impo_piezas_accesorios': 1000, 'impo_bienes_consumo': 600, 'impo_vehiculos': 520},
-            {'fecha': '2026-02-01', 'exportaciones_usd_millions': 7150, 'importaciones_usd_millions': 5120, 'saldo_usd_millions': 2030, 'expo_primarios': 1250, 'expo_moa': 2550, 'expo_moi': 1650, 'expo_energia': 1700, 'impo_bienes_capital': 880, 'impo_bienes_intermedios': 1880, 'impo_combustibles': 240, 'impo_piezas_accesorios': 1020, 'impo_bienes_consumo': 580, 'impo_vehiculos': 520}
+            {'fecha': '2026-01-01', 'exportaciones_usd_millions': 7057, 'importaciones_usd_millions': 5070, 'saldo_usd_millions': 1987, 'expo_primarios': 1200, 'expo_moa': 2500, 'expo_moi': 1700, 'expo_energia': 1657, 'impo_bienes_capital': 850, 'impo_bienes_intermedios': 1850, 'impo_combustibles': 250, 'impo_piezas_accesorios': 1000, 'impo_bienes_consumo': 600, 'impo_vehiculos': 520}
         ]
 
         # Consolidamos
