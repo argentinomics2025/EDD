@@ -23,7 +23,7 @@ def limpiar_numero(val):
         if num > 100000: num = num / 1000000.0
         return round(num, 2)
     s = str(val).strip().replace('\xa0', '').replace(' ', '')
-    if s in ['-', '///', '', 's/d']: return 0.0
+    if s in ['-', '///', '', 's/d', '.']: return 0.0
     s = s.replace(',', '.')
     try:
         num = float(s)
@@ -31,12 +31,11 @@ def limpiar_numero(val):
         return round(num, 2)
     except: return 0.0
 
-def procesar_excel_definitivo(archivo_excel):
+def procesar_excel_seguro(archivo_excel):
     xl = pd.ExcelFile(archivo_excel, engine='xlrd')
     datos_rubros = []
     datos_socios = []
     
-    # Mapeo de padres (Rubros Principales)
     mapeo_padres = {
         "productos primarios": "Productos primarios (PP)",
         "manufacturas de origen agropecuario": "Manufacturas de origen agropecuario (MOA)",
@@ -50,58 +49,60 @@ def procesar_excel_definitivo(archivo_excel):
         "vehículos automotores de pasajeros": "Vehículos automotores de pasajeros (VA)"
     }
     
-    # Países con búsqueda flexible
     paises_dic = {
-        "Brasil": ["brasil"],
-        "China": ["china"],
-        "Estados Unidos": ["estados unidos", "ee.uu", "usmca"],
-        "Chile": ["chile"],
-        "Paraguay": ["paraguay"],
-        "Vietnam": ["vietnam"],
-        "India": ["india"],
-        "Alemania": ["alemania"]
+        "Brasil": ["brasil"], "China": ["china"], "Estados Unidos": ["estados unidos", "ee.uu", "usmca"],
+        "Chile": ["chile"], "Paraguay": ["paraguay"], "Vietnam": ["vietnam"], "India": ["india"], "Alemania": ["alemania"]
     }
 
-    print(f"📋 Analizando {len(xl.sheet_names)} hojas...")
+    print(f"📋 Analizando {len(xl.sheet_names)} hojas con acceso seguro...")
 
     for sheet in xl.sheet_names:
         df = pd.read_excel(archivo_excel, sheet_name=sheet, header=None, engine='xlrd')
         padre_actual = None
-        tipo_flujo = "Exportacion" if "7" in sheet or "5" in sheet else "Importacion"
+        # Identificamos flujo por nombre de hoja (c7 expo, c8 impo en el anexo)
+        tipo_flujo = "Exportacion" if any(x in sheet.lower() for x in ["c7", "c5", "c3"]) else "Importacion"
 
         for index, row in df.iterrows():
-            celda = str(row[0]).strip()
-            celda_low = celda.lower()
+            if len(row) < 1 or pd.isna(row[0]): continue
             
-            if len(celda) < 2 or "fuente" in celda_low: continue
+            celda_raw = str(row[0]).strip()
+            celda_limpia = re.sub(r'\s*\(\d+\)', '', celda_raw).strip()
+            celda_low = celda_limpia.lower()
+            
+            if len(celda_limpia) < 2 or "fuente" in celda_low: continue
+
+            # --- SEGURIDAD: Solo procesar si la fila tiene datos en las columnas de valores ---
+            has_col_1 = len(row) > 1
+            has_col_2 = len(row) > 2
 
             # 1. DETECCIÓN DE RUBROS
             for key, nombre_db in mapeo_padres.items():
                 if celda_low.startswith(key):
                     padre_actual = nombre_db
-                    val = limpiar_numero(row[1])
-                    if val > 0:
-                        datos_rubros.append({
-                            "rubro_principal": nombre_db, "subrubro": "TOTAL",
-                            "valor_usd": val, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME
-                        })
+                    if has_col_1:
+                        val = limpiar_numero(row[1])
+                        if val > 0:
+                            datos_rubros.append({
+                                "rubro_principal": nombre_db, "subrubro": "TOTAL",
+                                "valor_usd": val, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME
+                            })
                     break
             
-            # SUBRUBROS (Hijos)
+            # SUBRUBROS (Si hay un padre activo y no es el inicio de otro padre)
             if padre_actual and not any(celda_low.startswith(k) for k in mapeo_padres.keys()):
-                val = limpiar_numero(row[1])
-                if val > 0 and len(celda) > 3:
-                    datos_rubros.append({
-                        "rubro_principal": padre_actual, "subrubro": celda,
-                        "valor_usd": val, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME
-                    })
+                if has_col_1:
+                    val = limpiar_numero(row[1])
+                    if val > 0 and len(celda_limpia) > 3:
+                        datos_rubros.append({
+                            "rubro_principal": padre_actual, "subrubro": celda_limpia,
+                            "valor_usd": val, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME
+                        })
 
             # 2. DETECCIÓN DE PAÍSES (SOCIOS)
             for nombre_pais, variantes in paises_dic.items():
-                if any(v in celda_low for v in variantes):
-                    # En tablas de países del anexo: Col 1=Expo, Col 2=Impo
-                    e = limpiar_numero(row[1])
-                    i = limpiar_numero(row[2])
+                if any(v == celda_low for v in variantes):
+                    e = limpiar_numero(row[1]) if has_col_1 else 0.0
+                    i = limpiar_numero(row[2]) if has_col_2 else 0.0
                     if e > 0 or i > 0:
                         datos_socios.append({
                             "pais": nombre_pais, "exportaciones": e, "importaciones": i,
@@ -117,28 +118,24 @@ if __name__ == "__main__":
         resp = requests.get(EXCEL_URL, headers={'User-Agent': 'Mozilla/5.0'})
         archivo = BytesIO(resp.content)
         
-        rubros, socios = procesar_excel_definitivo(archivo)
+        rubros, socios = procesar_excel_seguro(archivo)
         
-        # Deduplicar para evitar el error PGRST100 por registros vacíos o repetidos
         df_r = pd.DataFrame(rubros).drop_duplicates(subset=['rubro_principal', 'subrubro', 'tipo_flujo']) if rubros else pd.DataFrame()
         df_s = pd.DataFrame(socios).drop_duplicates(subset=['pais']) if socios else pd.DataFrame()
 
         print(f"🚀 Procesados: {len(df_r)} rubros y {len(df_s)} países.")
 
-        # Subida Segura a Supabase
         if not df_r.empty:
             supabase.table("comex_rubros").delete().eq("fecha_informe", MES_INFORME).execute()
             supabase.table("comex_rubros").insert(df_r.to_dict('records')).execute()
-            print("✅ Rubros actualizados.")
+            print("✅ Rubros y subrubros cargados.")
 
         if not df_s.empty:
             supabase.table("socios_comerciales").delete().eq("fecha_informe", MES_INFORME).execute()
             supabase.table("socios_comerciales").insert(df_s.to_dict('records')).execute()
-            print("✅ Socios comerciales actualizados.")
-        else:
-            print("⚠️ Alerta: No se encontraron socios comerciales. Revisar el Excel.")
+            print("✅ Socios comerciales cargados.")
 
-        print(f"🎉 Sincronización terminada.")
+        print(f"🎉 Sincronización finalizada con éxito.")
 
     except Exception as e:
         print(f"❌ Error Crítico: {e}")
