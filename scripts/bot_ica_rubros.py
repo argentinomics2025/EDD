@@ -9,6 +9,7 @@ from io import BytesIO
 # ⚙️ PANEL DE CONTROL
 # ==========================================
 MES_INFORME = "Febrero 2026"
+FECHA_DB = "2026-02-01" # Para la tabla datos_comex
 EXCEL_URL = "https://www.indec.gob.ar/ftp/cuadros/economia/ica_anexo_cuadros_19_03_26.xls"
 # ==========================================
 
@@ -31,10 +32,11 @@ def limpiar_numero(val):
         return round(num, 2)
     except: return 0.0
 
-def procesar_excel_seguro(archivo_excel):
+def procesar_todo(archivo_excel):
     xl = pd.ExcelFile(archivo_excel, engine='xlrd')
     datos_rubros = []
     datos_socios = []
+    totales = {"expo": 0, "impo": 0}
     
     mapeo_padres = {
         "productos primarios": "Productos primarios (PP)",
@@ -49,93 +51,82 @@ def procesar_excel_seguro(archivo_excel):
         "vehículos automotores de pasajeros": "Vehículos automotores de pasajeros (VA)"
     }
     
-    paises_dic = {
-        "Brasil": ["brasil"], "China": ["china"], "Estados Unidos": ["estados unidos", "ee.uu", "usmca"],
-        "Chile": ["chile"], "Paraguay": ["paraguay"], "Vietnam": ["vietnam"], "India": ["india"], "Alemania": ["alemania"]
-    }
-
-    print(f"📋 Analizando {len(xl.sheet_names)} hojas con acceso seguro...")
+    # Países: ahora buscamos si el nombre está "contenido" en la celda
+    paises_objetivo = ["Brasil", "China", "Estados Unidos", "Chile", "Paraguay", "Vietnam", "India", "Alemania"]
 
     for sheet in xl.sheet_names:
         df = pd.read_excel(archivo_excel, sheet_name=sheet, header=None, engine='xlrd')
         padre_actual = None
-        # Identificamos flujo por nombre de hoja (c7 expo, c8 impo en el anexo)
-        tipo_flujo = "Exportacion" if any(x in sheet.lower() for x in ["c7", "c5", "c3"]) else "Importacion"
+        tipo_flujo = "Exportacion" if any(x in sheet.lower() for x in ["c7", "c26", "c5"]) else "Importacion"
 
         for index, row in df.iterrows():
             if len(row) < 1 or pd.isna(row[0]): continue
-            
             celda_raw = str(row[0]).strip()
-            celda_limpia = re.sub(r'\s*\(\d+\)', '', celda_raw).strip()
-            celda_low = celda_limpia.lower()
+            celda_low = celda_raw.lower()
             
-            if len(celda_limpia) < 2 or "fuente" in celda_low: continue
+            # 1. TOTALES NACIONALES (Para datos_comex)
+            if celda_low == "total":
+                val = limpiar_numero(row[1])
+                if val > 1000: # Evitamos filas de sub-totales
+                    if tipo_flujo == "Exportacion" and totales["expo"] == 0: totales["expo"] = val
+                    if tipo_flujo == "Importacion" and totales["impo"] == 0: totales["impo"] = val
 
-            # --- SEGURIDAD: Solo procesar si la fila tiene datos en las columnas de valores ---
-            has_col_1 = len(row) > 1
-            has_col_2 = len(row) > 2
-
-            # 1. DETECCIÓN DE RUBROS
+            # 2. RUBROS Y SUBRUBROS
             for key, nombre_db in mapeo_padres.items():
                 if celda_low.startswith(key):
                     padre_actual = nombre_db
-                    if has_col_1:
-                        val = limpiar_numero(row[1])
-                        if val > 0:
-                            datos_rubros.append({
-                                "rubro_principal": nombre_db, "subrubro": "TOTAL",
-                                "valor_usd": val, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME
-                            })
+                    val = limpiar_numero(row[1])
+                    if val > 0:
+                        datos_rubros.append({"rubro_principal": nombre_db, "subrubro": "TOTAL", "valor_usd": val, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME})
                     break
             
-            # SUBRUBROS (Si hay un padre activo y no es el inicio de otro padre)
             if padre_actual and not any(celda_low.startswith(k) for k in mapeo_padres.keys()):
-                if has_col_1:
-                    val = limpiar_numero(row[1])
-                    if val > 0 and len(celda_limpia) > 3:
-                        datos_rubros.append({
-                            "rubro_principal": padre_actual, "subrubro": celda_limpia,
-                            "valor_usd": val, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME
-                        })
+                val = limpiar_numero(row[1])
+                if val > 0 and len(celda_raw) > 3 and "fuente" not in celda_low:
+                    datos_rubros.append({"rubro_principal": padre_actual, "subrubro": celda_raw, "valor_usd": val, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME})
 
-            # 2. DETECCIÓN DE PAÍSES (SOCIOS)
-            for nombre_pais, variantes in paises_dic.items():
-                if any(v == celda_low for v in variantes):
-                    e = limpiar_numero(row[1]) if has_col_1 else 0.0
-                    i = limpiar_numero(row[2]) if has_col_2 else 0.0
+            # 3. PAÍSES (SOCIOS) - Búsqueda más inteligente
+            for p in paises_objetivo:
+                # Si el nombre del país está en la celda y no es una nota al pie larga
+                if p.lower() in celda_low and len(celda_raw) < 25:
+                    e = limpiar_numero(row[1])
+                    i = limpiar_numero(row[2])
                     if e > 0 or i > 0:
-                        datos_socios.append({
-                            "pais": nombre_pais, "exportaciones": e, "importaciones": i,
-                            "saldo_comercial": round(e-i, 2), "fecha_informe": MES_INFORME
-                        })
+                        datos_socios.append({"pais": p, "exportaciones": e, "importaciones": i, "saldo_comercial": round(e-i, 2), "fecha_informe": MES_INFORME})
                     break
 
-    return datos_rubros, datos_socios
+    return datos_rubros, datos_socios, totales
 
 if __name__ == "__main__":
     try:
-        print(f"🔍 Descargando Excel...")
+        print(f"🔍 Descargando y analizando...")
         resp = requests.get(EXCEL_URL, headers={'User-Agent': 'Mozilla/5.0'})
         archivo = BytesIO(resp.content)
+        rubros, socios, totals = procesar_todo(archivo)
         
-        rubros, socios = procesar_excel_seguro(archivo)
-        
-        df_r = pd.DataFrame(rubros).drop_duplicates(subset=['rubro_principal', 'subrubro', 'tipo_flujo']) if rubros else pd.DataFrame()
-        df_s = pd.DataFrame(socios).drop_duplicates(subset=['pais']) if socios else pd.DataFrame()
+        # Limpieza
+        df_r = pd.DataFrame(rubros).drop_duplicates(subset=['rubro_principal', 'subrubro', 'tipo_flujo'])
+        df_s = pd.DataFrame(socios).drop_duplicates(subset=['pais'])
 
-        print(f"🚀 Procesados: {len(df_r)} rubros y {len(df_s)} países.")
+        print(f"🚀 Resultados: {len(df_r)} rubros, {len(df_s)} países, Totales: E:{totals['expo']} I:{totals['impo']}")
 
+        # 1. Cargar Totales
+        if totals['expo'] > 0:
+            supabase.table("datos_comex").delete().eq("fecha", FECHA_DB).execute()
+            supabase.table("datos_comex").insert({"fecha": FECHA_DB, "exportaciones_usd_millions": totals['expo'], "importaciones_usd_millions": totals['impo'], "saldo_usd_millions": round(totals['expo']-totals['impo'], 2)}).execute()
+            print("✅ Tabla 'datos_comex' actualizada.")
+
+        # 2. Cargar Rubros
         if not df_r.empty:
             supabase.table("comex_rubros").delete().eq("fecha_informe", MES_INFORME).execute()
             supabase.table("comex_rubros").insert(df_r.to_dict('records')).execute()
-            print("✅ Rubros y subrubros cargados.")
+            print("✅ Tabla 'comex_rubros' actualizada.")
 
+        # 3. Cargar Países
         if not df_s.empty:
             supabase.table("socios_comerciales").delete().eq("fecha_informe", MES_INFORME).execute()
             supabase.table("socios_comerciales").insert(df_s.to_dict('records')).execute()
-            print("✅ Socios comerciales cargados.")
+            print("✅ Tabla 'socios_comerciales' actualizada.")
 
-        print(f"🎉 Sincronización finalizada con éxito.")
-
-    except Exception as e:
-        print(f"❌ Error Crítico: {e}")
+        print("🎉 Sincronización completa.")
+    except Exception as e: print(f"❌ Error: {e}")
