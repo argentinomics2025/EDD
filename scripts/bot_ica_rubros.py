@@ -48,6 +48,7 @@ def limpiar_numero(val):
 
 def detectar_pestanas_rubros(excel_bytes):
     xl = pd.ExcelFile(excel_bytes, engine='xlrd')
+    print(f"📋 Hojas detectadas en el Excel: {xl.sheet_names}")
     pestanas = {'expo': None, 'impo': None}
     
     for sheet in xl.sheet_names:
