@@ -6,22 +6,23 @@ from supabase import create_client, Client
 from io import BytesIO
 
 # ==========================================
-# ⚙️ PANEL DE CONTROL (Actualizar cada mes)
+# ⚙️ PANEL DE CONTROL (Actualizado)
 # ==========================================
 MES_INFORME = "Febrero 2026"
-EXCEL_URL = "https://www.indec.gob.ar/ftp/cuadros/economia/ica_anexo_cuadros_19_03_26.xls"
+# Usamos el archivo de Cuadros Principal que encontraste
+EXCEL_URL = "https://www.indec.gob.ar/ftp/cuadros/economia/ica_cuadros_19_03_26.xls"
 # ==========================================
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("⚠️ Faltan las credenciales de Supabase en las variables de entorno.")
+    raise ValueError("⚠️ Faltan las credenciales de Supabase.")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def descargar_excel():
-    print(f"🔍 Descargando Excel del INDEC para {MES_INFORME}...")
+    print(f"🔍 Descargando Informe ICA Principal para {MES_INFORME}...")
     headers = {'User-Agent': 'Mozilla/5.0'}
     response = requests.get(EXCEL_URL, headers=headers)
     response.raise_for_status()
@@ -31,7 +32,7 @@ def limpiar_numero(val):
     if pd.isna(val): return 0.0
     if isinstance(val, (int, float)):
         num = float(val)
-        if num > 100000: num = num / 1000000.0
+        if num > 100000: num = num / 1000000.0 # Corrección si viene en USD y no en Millones
         return round(num, 2)
     if isinstance(val, str):
         val = val.strip()
@@ -48,97 +49,85 @@ def limpiar_numero(val):
 
 def detectar_pestanas_rubros(excel_bytes):
     xl = pd.ExcelFile(excel_bytes, engine='xlrd')
-    print(f"📋 Hojas detectadas en el Excel: {xl.sheet_names}")
+    print(f"📋 Hojas disponibles: {xl.sheet_names}")
     pestanas = {'expo': None, 'impo': None}
     
     for sheet in xl.sheet_names:
-        df_temp = pd.read_excel(excel_bytes, sheet_name=sheet, nrows=20, header=None, engine='xlrd')
+        df_temp = pd.read_excel(excel_bytes, sheet_name=sheet, nrows=15, header=None, engine='xlrd')
         if df_temp.empty: continue
-        texto_hoja = df_temp.astype(str).apply(lambda x: ' '.join(x), axis=1).str.lower().str.cat(sep=' ')
         
-        if "exportaciones a los principales socios comerciales por grandes rubros" in texto_hoja and "subrubros" in texto_hoja:
+        texto_cabecera = df_temp.astype(str).apply(lambda x: ' '.join(x), axis=1).str.lower().str.cat(sep=' ')
+        
+        # Búsqueda más precisa para el archivo "ica_cuadros"
+        if "exportaciones" in texto_cabecera and "grandes rubros" in texto_cabecera:
             pestanas['expo'] = sheet
-        elif ("importaciones desde los principales socios comerciales por usos económicos" in texto_hoja or "categorías económicas" in texto_hoja) and "saldo e intercambio" not in texto_hoja:
+            print(f"✅ Exportaciones detectadas en: {sheet}")
+                
+        elif "importaciones" in texto_cabecera and "usos económicos" in texto_cabecera:
             pestanas['impo'] = sheet
+            print(f"✅ Importaciones detectadas en: {sheet}")
             
     return pestanas
 
-def procesar_jerarquia(df_crudo, tipo_flujo):
-    datos_procesados = []
-    rubro_actual = "Sin Clasificar"
+def procesar_cuadro(df_crudo, tipo_flujo):
+    datos = []
+    # En el informe principal, los rubros suelen estar en la columna 0 y el valor del mes en la 1 o 2
+    # El robot va a intentar detectar cuál columna tiene los números
     
-    print(f"\n🧠 Analizando jerarquías para: {tipo_flujo}...")
+    print(f"🧠 Analizando estructura de {tipo_flujo}...")
     
     for index, row in df_crudo.iterrows():
-        texto_original = str(row[0])
-        if texto_original == 'nan' or not texto_original.strip():
-            continue
-            
-        nombre = texto_original.strip()
+        nombre = str(row[0]).strip()
+        # Buscamos el valor en las columnas 1 o 2 (el INDEC a veces pone "Variación" en la 1)
         valor = limpiar_numero(row[1])
+        if valor == 0: valor = limpiar_numero(row[2])
         
-        # Filtro de basura técnica del INDEC
-        if any(basura in nombre.lower() for basura in ["fuente:", "nota:", "selección", "importaciones", "exportaciones"]):
-            continue
-            
-        # 🔑 LA REGLA DE ORO: Si termina en ")" o es "Resto", es un PADRE.
-        if nombre.endswith(")") or nombre.lower() == "resto":
-            rubro_actual = nombre
-            if valor > 0:
-                # Guardamos la fila del TOTAL del Rubro Principal
-                datos_procesados.append({
-                    "rubro_principal": rubro_actual,
-                    "subrubro": "TOTAL",
-                    "valor_usd": valor,
-                    "tipo_flujo": tipo_flujo,
-                    "fecha_informe": MES_INFORME
-                })
-                print(f"   📁 PADRE ENCONTRADO: {rubro_actual} -> ${valor}")
+        if not nombre or nombre == 'nan' or len(nombre) < 3: continue
+        if any(b in nombre.lower() for b in ["fuente:", "nota:", "variación", "índice", "exportaciones", "importaciones"]): continue
+
+        # Identificamos si es Rubro Principal (Padre) o Detalle (Hijo)
+        # En este Excel, los padres suelen terminar en ")" (ej: (MOA))
+        es_padre = nombre.endswith(")") or nombre.lower() == "resto"
+        
+        datos.append({
+            "rubro_principal": nombre if es_padre else "Detalle", 
+            "subrubro": "TOTAL" if es_padre else nombre,
+            "valor_usd": valor,
+            "tipo_flujo": tipo_flujo,
+            "fecha_informe": MES_INFORME
+        })
+    
+    # Asignamos los hijos a sus padres correspondientes
+    rubro_actual = "Otros"
+    for d in datos:
+        if d["subrubro"] == "TOTAL":
+            rubro_actual = d["rubro_principal"]
         else:
-            # Es un HIJO (Subrubro). Se lo asignamos al último Padre que vimos.
-            if len(nombre) > 3 and valor > 0:
-                datos_procesados.append({
-                    "rubro_principal": rubro_actual,
-                    "subrubro": nombre,
-                    "valor_usd": valor,
-                    "tipo_flujo": tipo_flujo,
-                    "fecha_informe": MES_INFORME
-                })
-                print(f"      ↳ Hijo: {nombre} -> ${valor}")
-                
-    return datos_procesados
+            d["rubro_principal"] = rubro_actual
+            
+    return [d for d in datos if d["valor_usd"] > 0]
 
-def obtener_rubros(excel_bytes, sheet_name, tipo_flujo):
-    if not sheet_name:
-        print(f"❌ No se encontró la pestaña para {tipo_flujo}.")
-        return []
-        
-    df = pd.read_excel(excel_bytes, sheet_name=sheet_name, header=None, skiprows=6, engine='xlrd')
-    if len(df.columns) < 2: return []
-    
-    # Columna 0 (Textos) y Columna 1 (Valores)
-    df_rubros = df.iloc[:, [0, 1]].copy()
-    
-    return procesar_jerarquia(df_rubros, tipo_flujo)
+def obtener_datos(excel_bytes, sheet_name, tipo_flujo):
+    if not sheet_name: return []
+    # Para el archivo principal, saltamos 8 filas (títulos largos)
+    df = pd.read_excel(excel_bytes, sheet_name=sheet_name, header=None, skiprows=8, engine='xlrd')
+    return procesar_cuadro(df, tipo_flujo)
 
-def subir_rubros_a_supabase(datos):
-    if not datos:
-        return
-    print(f"\n🚀 Subiendo {len(datos)} registros a Supabase para {MES_INFORME}...")
+def subir_a_supabase(datos):
+    if not datos: return
+    print(f"🚀 Subiendo {len(datos)} registros de {MES_INFORME}...")
     supabase.table("comex_rubros").delete().eq("fecha_informe", MES_INFORME).execute()
     supabase.table("comex_rubros").insert(datos).execute()
 
 if __name__ == "__main__":
     try:
-        archivo_excel = descargar_excel()
-        pestanas = detectar_pestanas_rubros(archivo_excel)
+        archivo = descargar_excel()
+        hojas = detectar_pestanas_rubros(archivo)
         
-        datos_expo = obtener_rubros(archivo_excel, pestanas['expo'], 'Exportacion')
-        datos_impo = obtener_rubros(archivo_excel, pestanas['impo'], 'Importacion')
+        data_total = obtener_datos(archivo, hojas['expo'], 'Exportacion') + \
+                     obtener_datos(archivo, hojas['impo'], 'Importacion')
         
-        todos_los_rubros = datos_expo + datos_impo
-        subir_rubros_a_supabase(todos_los_rubros)
-        
-        print("✅✅ ¡Sincronización de Padres e Hijos completada con éxito! ✅✅")
+        subir_a_supabase(data_total)
+        print(f"🎉 Sincronización de {MES_INFORME} exitosa.")
     except Exception as e:
-        print(f"❌ Error crítico general: {e}")
+        print(f"❌ Error: {e}")
