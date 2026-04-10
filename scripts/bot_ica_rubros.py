@@ -8,8 +8,8 @@ from io import BytesIO
 # ==========================================
 # ⚙️ PANEL DE CONTROL (Actualizar cada mes)
 # ==========================================
-MES_INFORME = "Enero 2026"
-EXCEL_URL = "https://www.indec.gob.ar/ftp/cuadros/economia/ica_cuadros_19_02_26.xls"
+MES_INFORME = "Febrero 2026"
+EXCEL_URL = "https://www.indec.gob.ar/ftp/cuadros/economia/ica_anexo_cuadros_19_03_26.xls"
 # ==========================================
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
