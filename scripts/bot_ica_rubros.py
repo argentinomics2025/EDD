@@ -30,91 +30,93 @@ def limpiar_numero(val):
         if num > 100000: num = num / 1000000.0
         return round(num, 2)
     if isinstance(val, str):
-        val = val.strip().replace(' ', '').replace('\xa0', '').replace('.', '').replace(',', '.')
-        val = re.sub(r'[^\d.-]', '', val)
+        # Limpieza profunda de strings
+        s = val.strip().replace('\xa0', '').replace(' ', '')
+        s = s.replace('.', '').replace(',', '.')
+        s = re.sub(r'[^\d.-]', '', s)
         try:
-            num = float(val)
+            num = float(s)
             if num > 100000: num = num / 1000000.0
             return round(num, 2)
         except: return 0.0
     return 0.0
 
-def obtener_datos_finales(archivo_excel):
-    datos_para_subir = []
-    
-    # 🔵 PROCESAR EXPORTACIONES (CUADRO 5)
-    print("📦 Procesando Cuadro 5 (Exportaciones)...")
+def extraer_de_hoja(archivo_excel, sheet, mapeo, flujo):
+    print(f"📦 Analizando Hoja {sheet} ({flujo})...")
+    datos = []
     try:
-        df_expo = pd.read_excel(archivo_excel, sheet_name='c5', skiprows=9, header=None, engine='xlrd')
-        # El INDEC suele tener: Col 0 = Nombre, Col 1 = Valor Mes Actual
-        mapeo_expo = {
-            "Productos primarios (PP)": 0,
-            "Manufacturas de origen agropecuario (MOA)": 0,
-            "Manufacturas de origen industrial (MOI)": 0,
-            "Combustibles y energía (CyE)": 0
-        }
+        # Leemos la hoja completa para no errar con skiprows
+        df = pd.read_excel(archivo_excel, sheet_name=sheet, header=None, engine='xlrd')
         
-        for _, row in df_expo.iterrows():
-            nombre = str(row[0]).strip()
-            for key in mapeo_expo.keys():
-                if key in nombre:
-                    valor = limpiar_numero(row[1])
+        for index, row in df.iterrows():
+            nombre_celda = str(row[0]).lower()
+            
+            for nombre_db, keywords in mapeo.items():
+                # Si alguna de las palabras clave está en la celda...
+                if any(kw in nombre_celda for kw in keywords):
+                    # El valor suele estar en la columna 1, 2 o 3 según el mes
+                    # Buscamos el primer número válido en la fila
+                    valor = 0.0
+                    for col_idx in [1, 2, 3]:
+                        if col_idx < len(row):
+                            v = limpiar_numero(row[col_idx])
+                            if v > 0:
+                                valor = v
+                                break
+                    
                     if valor > 0:
-                        datos_para_subir.append({
-                            "rubro_principal": key,
+                        datos.append({
+                            "rubro_principal": nombre_db,
                             "subrubro": "TOTAL",
                             "valor_usd": valor,
-                            "tipo_flujo": "Exportacion",
+                            "tipo_flujo": flujo,
                             "fecha_informe": MES_INFORME
                         })
+                        print(f"   ✅ Encontrado: {nombre_db} -> {valor} M")
+                        break # Ya encontramos este rubro, pasamos a la siguiente fila
     except Exception as e:
-        print(f"❌ Error en Cuadro 5: {e}")
-
-    # 🔴 PROCESAR IMPORTACIONES (CUADRO 6)
-    print("📦 Procesando Cuadro 6 (Importaciones)...")
-    try:
-        archivo_excel.seek(0) # Reset del buffer
-        df_impo = pd.read_excel(archivo_excel, sheet_name='c6', skiprows=9, header=None, engine='xlrd')
-        mapeo_impo = {
-            "Bienes de capital (BK)": "Bienes de capital",
-            "Bienes intermedios (BI)": "Bienes intermedios",
-            "Combustibles y lubricantes (CyL)": "Combustibles y lubricantes",
-            "Piezas y accesorios para bienes de capital (PyA)": "Piezas y accesorios",
-            "Bienes de consumo (BC)": "Bienes de consumo",
-            "Vehículos automotores de pasajeros (VA)": "Vehículos automotores"
-        }
-        
-        for _, row in df_impo.iterrows():
-            nombre = str(row[0]).strip()
-            for full_name, search_name in mapeo_impo.items():
-                if search_name in nombre:
-                    valor = limpiar_numero(row[1])
-                    if valor > 0:
-                        datos_para_subir.append({
-                            "rubro_principal": full_name,
-                            "subrubro": "TOTAL",
-                            "valor_usd": valor,
-                            "tipo_flujo": "Importacion",
-                            "fecha_informe": MES_INFORME
-                        })
-    except Exception as e:
-        print(f"❌ Error en Cuadro 6: {e}")
-
-    return datos_para_subir
+        print(f"   ❌ Error procesando {sheet}: {e}")
+    return datos
 
 if __name__ == "__main__":
     try:
-        excel = descargar_excel()
-        datos = obtener_datos_finales(excel)
+        excel_raw = descargar_excel()
         
-        if datos:
-            print(f"🚀 Subiendo {len(datos)} registros limpios a Supabase...")
-            # Limpiamos para evitar duplicados de este mes
+        # Mapeos por Keywords (más flexible)
+        mapeo_expo = {
+            "Productos primarios (PP)": ["primarios"],
+            "Manufacturas de origen agropecuario (MOA)": ["agropecuario", "moa"],
+            "Manufacturas de origen industrial (MOI)": ["industrial", "moi"],
+            "Combustibles y energía (CyE)": ["combustibles y energía", "cye"]
+        }
+        
+        mapeo_impo = {
+            "Bienes de capital (BK)": ["capital"],
+            "Bienes intermedios (BI)": ["intermedios"],
+            "Combustibles y lubricantes (CyL)": ["combustibles y lubricantes", "cyl"],
+            "Piezas y accesorios para bienes de capital (PyA)": ["piezas", "accesorios"],
+            "Bienes de consumo (BC)": ["consumo"],
+            "Vehículos automotores de pasajeros (VA)": ["vehículos", "automotores"]
+        }
+
+        # Extraemos
+        datos_totales = []
+        datos_totales += extraer_de_hoja(excel_raw, 'c5', mapeo_expo, 'Exportacion')
+        excel_raw.seek(0)
+        datos_totales += extraer_de_hoja(excel_raw, 'c6', mapeo_impo, 'Importacion')
+
+        if len(datos_totales) >= 8: # Mínimo esperado
+            print(f"🚀 Subiendo {len(datos_totales)} registros validados...")
             supabase.table("comex_rubros").delete().eq("fecha_informe", MES_INFORME).execute()
-            supabase.table("comex_rubros").insert(datos).execute()
-            print("✅ Sincronización exitosa y limpia.")
+            supabase.table("comex_rubros").insert(datos_totales).execute()
+            print("🎉 ¡Sincronización Exitosa!")
         else:
-            print("⚠️ No se extrajeron datos. Revisar estructura del Excel.")
+            print(f"⚠️ Solo se encontraron {len(datos_totales)} registros. Es muy poco, algo falló.")
+            # Debug: imprimir las primeras filas de c5 si falla
+            excel_raw.seek(0)
+            df_debug = pd.read_excel(excel_raw, sheet_name='c5', nrows=15, header=None, engine='xlrd')
+            print("\n🔍 DEBUG - Primeras filas de c5:")
+            print(df_debug.iloc[:, 0:2])
             
     except Exception as e:
         print(f"❌ Error crítico: {e}")
