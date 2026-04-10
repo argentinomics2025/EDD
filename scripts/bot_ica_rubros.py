@@ -1,4 +1,4 @@
-import os
+    import os
 import pandas as pd
 import requests
 import re
@@ -6,19 +6,14 @@ from supabase import create_client, Client
 from io import BytesIO
 
 # ==========================================
-# ⚙️ PANEL DE CONTROL (Actualizado)
+# ⚙️ PANEL DE CONTROL
 # ==========================================
 MES_INFORME = "Febrero 2026"
-# Usamos el archivo de Cuadros Principal que encontraste
 EXCEL_URL = "https://www.indec.gob.ar/ftp/cuadros/economia/ica_cuadros_19_03_26.xls"
 # ==========================================
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("⚠️ Faltan las credenciales de Supabase.")
-
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def descargar_excel():
@@ -32,102 +27,94 @@ def limpiar_numero(val):
     if pd.isna(val): return 0.0
     if isinstance(val, (int, float)):
         num = float(val)
-        if num > 100000: num = num / 1000000.0 # Corrección si viene en USD y no en Millones
-        return round(num, 2)
-    if isinstance(val, str):
-        val = val.strip()
-        if val in ['-', 's/d', '', ' ', '///']: return 0.0
-        val = val.replace(' ', '').replace('\xa0', '')
-        val = val.replace('.', '').replace(',', '.')
-        val = re.sub(r'[^\d.-]', '', val)
-    try:
-        num = float(val)
         if num > 100000: num = num / 1000000.0
         return round(num, 2)
-    except ValueError:
-        return 0.0
+    if isinstance(val, str):
+        val = val.strip().replace(' ', '').replace('\xa0', '').replace('.', '').replace(',', '.')
+        val = re.sub(r'[^\d.-]', '', val)
+        try:
+            num = float(val)
+            if num > 100000: num = num / 1000000.0
+            return round(num, 2)
+        except: return 0.0
+    return 0.0
 
-def detectar_pestanas_rubros(excel_bytes):
-    xl = pd.ExcelFile(excel_bytes, engine='xlrd')
-    print(f"📋 Hojas disponibles: {xl.sheet_names}")
-    pestanas = {'expo': None, 'impo': None}
+def obtener_datos_finales(archivo_excel):
+    datos_para_subir = []
     
-    for sheet in xl.sheet_names:
-        df_temp = pd.read_excel(excel_bytes, sheet_name=sheet, nrows=15, header=None, engine='xlrd')
-        if df_temp.empty: continue
+    # 🔵 PROCESAR EXPORTACIONES (CUADRO 5)
+    print("📦 Procesando Cuadro 5 (Exportaciones)...")
+    try:
+        df_expo = pd.read_excel(archivo_excel, sheet_name='c5', skiprows=9, header=None, engine='xlrd')
+        # El INDEC suele tener: Col 0 = Nombre, Col 1 = Valor Mes Actual
+        mapeo_expo = {
+            "Productos primarios (PP)": 0,
+            "Manufacturas de origen agropecuario (MOA)": 0,
+            "Manufacturas de origen industrial (MOI)": 0,
+            "Combustibles y energía (CyE)": 0
+        }
         
-        texto_cabecera = df_temp.astype(str).apply(lambda x: ' '.join(x), axis=1).str.lower().str.cat(sep=' ')
+        for _, row in df_expo.iterrows():
+            nombre = str(row[0]).strip()
+            for key in mapeo_expo.keys():
+                if key in nombre:
+                    valor = limpiar_numero(row[1])
+                    if valor > 0:
+                        datos_para_subir.append({
+                            "rubro_principal": key,
+                            "subrubro": "TOTAL",
+                            "valor_usd": valor,
+                            "tipo_flujo": "Exportacion",
+                            "fecha_informe": MES_INFORME
+                        })
+    except Exception as e:
+        print(f"❌ Error en Cuadro 5: {e}")
+
+    # 🔴 PROCESAR IMPORTACIONES (CUADRO 6)
+    print("📦 Procesando Cuadro 6 (Importaciones)...")
+    try:
+        archivo_excel.seek(0) # Reset del buffer
+        df_impo = pd.read_excel(archivo_excel, sheet_name='c6', skiprows=9, header=None, engine='xlrd')
+        mapeo_impo = {
+            "Bienes de capital (BK)": "Bienes de capital",
+            "Bienes intermedios (BI)": "Bienes intermedios",
+            "Combustibles y lubricantes (CyL)": "Combustibles y lubricantes",
+            "Piezas y accesorios para bienes de capital (PyA)": "Piezas y accesorios",
+            "Bienes de consumo (BC)": "Bienes de consumo",
+            "Vehículos automotores de pasajeros (VA)": "Vehículos automotores"
+        }
         
-        # Búsqueda más precisa para el archivo "ica_cuadros"
-        if "exportaciones" in texto_cabecera and "grandes rubros" in texto_cabecera:
-            pestanas['expo'] = sheet
-            print(f"✅ Exportaciones detectadas en: {sheet}")
-                
-        elif "importaciones" in texto_cabecera and "usos económicos" in texto_cabecera:
-            pestanas['impo'] = sheet
-            print(f"✅ Importaciones detectadas en: {sheet}")
-            
-    return pestanas
+        for _, row in df_impo.iterrows():
+            nombre = str(row[0]).strip()
+            for full_name, search_name in mapeo_impo.items():
+                if search_name in nombre:
+                    valor = limpiar_numero(row[1])
+                    if valor > 0:
+                        datos_para_subir.append({
+                            "rubro_principal": full_name,
+                            "subrubro": "TOTAL",
+                            "valor_usd": valor,
+                            "tipo_flujo": "Importacion",
+                            "fecha_informe": MES_INFORME
+                        })
+    except Exception as e:
+        print(f"❌ Error en Cuadro 6: {e}")
 
-def procesar_cuadro(df_crudo, tipo_flujo):
-    datos = []
-    # En el informe principal, los rubros suelen estar en la columna 0 y el valor del mes en la 1 o 2
-    # El robot va a intentar detectar cuál columna tiene los números
-    
-    print(f"🧠 Analizando estructura de {tipo_flujo}...")
-    
-    for index, row in df_crudo.iterrows():
-        nombre = str(row[0]).strip()
-        # Buscamos el valor en las columnas 1 o 2 (el INDEC a veces pone "Variación" en la 1)
-        valor = limpiar_numero(row[1])
-        if valor == 0: valor = limpiar_numero(row[2])
-        
-        if not nombre or nombre == 'nan' or len(nombre) < 3: continue
-        if any(b in nombre.lower() for b in ["fuente:", "nota:", "variación", "índice", "exportaciones", "importaciones"]): continue
-
-        # Identificamos si es Rubro Principal (Padre) o Detalle (Hijo)
-        # En este Excel, los padres suelen terminar en ")" (ej: (MOA))
-        es_padre = nombre.endswith(")") or nombre.lower() == "resto"
-        
-        datos.append({
-            "rubro_principal": nombre if es_padre else "Detalle", 
-            "subrubro": "TOTAL" if es_padre else nombre,
-            "valor_usd": valor,
-            "tipo_flujo": tipo_flujo,
-            "fecha_informe": MES_INFORME
-        })
-    
-    # Asignamos los hijos a sus padres correspondientes
-    rubro_actual = "Otros"
-    for d in datos:
-        if d["subrubro"] == "TOTAL":
-            rubro_actual = d["rubro_principal"]
-        else:
-            d["rubro_principal"] = rubro_actual
-            
-    return [d for d in datos if d["valor_usd"] > 0]
-
-def obtener_datos(excel_bytes, sheet_name, tipo_flujo):
-    if not sheet_name: return []
-    # Para el archivo principal, saltamos 8 filas (títulos largos)
-    df = pd.read_excel(excel_bytes, sheet_name=sheet_name, header=None, skiprows=8, engine='xlrd')
-    return procesar_cuadro(df, tipo_flujo)
-
-def subir_a_supabase(datos):
-    if not datos: return
-    print(f"🚀 Subiendo {len(datos)} registros de {MES_INFORME}...")
-    supabase.table("comex_rubros").delete().eq("fecha_informe", MES_INFORME).execute()
-    supabase.table("comex_rubros").insert(datos).execute()
+    return datos_para_subir
 
 if __name__ == "__main__":
     try:
-        archivo = descargar_excel()
-        hojas = detectar_pestanas_rubros(archivo)
+        excel = descargar_excel()
+        datos = obtener_datos_finales(excel)
         
-        data_total = obtener_datos(archivo, hojas['expo'], 'Exportacion') + \
-                     obtener_datos(archivo, hojas['impo'], 'Importacion')
-        
-        subir_a_supabase(data_total)
-        print(f"🎉 Sincronización de {MES_INFORME} exitosa.")
+        if datos:
+            print(f"🚀 Subiendo {len(datos)} registros limpios a Supabase...")
+            # Limpiamos para evitar duplicados de este mes
+            supabase.table("comex_rubros").delete().eq("fecha_informe", MES_INFORME).execute()
+            supabase.table("comex_rubros").insert(datos).execute()
+            print("✅ Sincronización exitosa y limpia.")
+        else:
+            print("⚠️ No se extrajeron datos. Revisar estructura del Excel.")
+            
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error crítico: {e}")
