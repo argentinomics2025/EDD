@@ -17,7 +17,7 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def descargar_excel():
-    print(f"🔍 Descargando Informe ICA Principal para {MES_INFORME}...")
+    print(f"🔍 Descargando archivo para {MES_INFORME}...")
     headers = {'User-Agent': 'Mozilla/5.0'}
     response = requests.get(EXCEL_URL, headers=headers)
     response.raise_for_status()
@@ -30,10 +30,15 @@ def limpiar_numero(val):
         if num > 100000: num = num / 1000000.0
         return round(num, 2)
     if isinstance(val, str):
-        # Limpieza profunda de strings
+        # El INDEC usa ',' para decimales y '.' para miles, o a veces solo ','
         s = val.strip().replace('\xa0', '').replace(' ', '')
-        s = s.replace('.', '').replace(',', '.')
-        s = re.sub(r'[^\d.-]', '', s)
+        if s == '-' or s == '///' or not s: return 0.0
+        # Reemplazamos la coma decimal por punto
+        s = s.replace(',', '.')
+        # Si quedó más de un punto (porque había punto de miles), dejamos solo el último
+        if s.count('.') > 1:
+            parts = s.split('.')
+            s = "".join(parts[:-1]) + "." + parts[-1]
         try:
             num = float(s)
             if num > 100000: num = num / 1000000.0
@@ -45,24 +50,17 @@ def extraer_de_hoja(archivo_excel, sheet, mapeo, flujo):
     print(f"📦 Analizando Hoja {sheet} ({flujo})...")
     datos = []
     try:
-        # Leemos la hoja completa para no errar con skiprows
+        # Leemos la hoja
         df = pd.read_excel(archivo_excel, sheet_name=sheet, header=None, engine='xlrd')
         
         for index, row in df.iterrows():
             nombre_celda = str(row[0]).lower()
             
             for nombre_db, keywords in mapeo.items():
-                # Si alguna de las palabras clave está en la celda...
+                # Si alguna keyword coincide con el inicio de la celda (más preciso)
                 if any(kw in nombre_celda for kw in keywords):
-                    # El valor suele estar en la columna 1, 2 o 3 según el mes
-                    # Buscamos el primer número válido en la fila
-                    valor = 0.0
-                    for col_idx in [1, 2, 3]:
-                        if col_idx < len(row):
-                            v = limpiar_numero(row[col_idx])
-                            if v > 0:
-                                valor = v
-                                break
+                    # En el Anexo (c7 y c8), el valor TOTAL del mes está en la columna 1
+                    valor = limpiar_numero(row[1])
                     
                     if valor > 0:
                         datos.append({
@@ -72,51 +70,46 @@ def extraer_de_hoja(archivo_excel, sheet, mapeo, flujo):
                             "tipo_flujo": flujo,
                             "fecha_informe": MES_INFORME
                         })
-                        print(f"   ✅ Encontrado: {nombre_db} -> {valor} M")
-                        break # Ya encontramos este rubro, pasamos a la siguiente fila
+                        print(f"   ✅ {nombre_db}: {valor} M")
+                        break 
     except Exception as e:
-        print(f"   ❌ Error procesando {sheet}: {e}")
+        print(f"   ❌ Error en {sheet}: {e}")
     return datos
 
 if __name__ == "__main__":
     try:
         excel_raw = descargar_excel()
         
-        # Mapeos por Keywords (más flexible)
+        # Mapeos precisos para el Anexo
         mapeo_expo = {
-            "Productos primarios (PP)": ["primarios"],
-            "Manufacturas de origen agropecuario (MOA)": ["agropecuario", "moa"],
-            "Manufacturas de origen industrial (MOI)": ["industrial", "moi"],
-            "Combustibles y energía (CyE)": ["combustibles y energía", "cye"]
+            "Productos primarios (PP)": ["productos primarios"],
+            "Manufacturas de origen agropecuario (MOA)": ["manufacturas de origen agropecuario"],
+            "Manufacturas de origen industrial (MOI)": ["manufacturas de origen industrial"],
+            "Combustibles y energía (CyE)": ["combustibles y energía"]
         }
         
         mapeo_impo = {
-            "Bienes de capital (BK)": ["capital"],
-            "Bienes intermedios (BI)": ["intermedios"],
-            "Combustibles y lubricantes (CyL)": ["combustibles y lubricantes", "cyl"],
-            "Piezas y accesorios para bienes de capital (PyA)": ["piezas", "accesorios"],
-            "Bienes de consumo (BC)": ["consumo"],
-            "Vehículos automotores de pasajeros (VA)": ["vehículos", "automotores"]
+            "Bienes de capital (BK)": ["bienes de capital"],
+            "Bienes intermedios (BI)": ["bienes intermedios"],
+            "Combustibles y lubricantes (CyL)": ["combustibles y lubricantes"],
+            "Piezas y accesorios para bienes de capital (PyA)": ["piezas y accesorios"],
+            "Bienes de consumo (BC)": ["bienes de consumo"],
+            "Vehículos automotores de pasajeros (VA)": ["vehículos automotores"]
         }
 
-        # Extraemos
         datos_totales = []
-        datos_totales += extraer_de_hoja(excel_raw, 'c5', mapeo_expo, 'Exportacion')
+        # CAMBIO CLAVE: c7 para Expo, c8 para Impo
+        datos_totales += extraer_de_hoja(excel_raw, 'c7', mapeo_expo, 'Exportacion')
         excel_raw.seek(0)
-        datos_totales += extraer_de_hoja(excel_raw, 'c6', mapeo_impo, 'Importacion')
+        datos_totales += extraer_de_hoja(excel_raw, 'c8', mapeo_impo, 'Importacion')
 
-        if len(datos_totales) >= 8: # Mínimo esperado
+        if len(datos_totales) >= 8:
             print(f"🚀 Subiendo {len(datos_totales)} registros validados...")
             supabase.table("comex_rubros").delete().eq("fecha_informe", MES_INFORME).execute()
             supabase.table("comex_rubros").insert(datos_totales).execute()
-            print("🎉 ¡Sincronización Exitosa!")
+            print(f"🎉 ¡Sincronización de {MES_INFORME} exitosa!")
         else:
-            print(f"⚠️ Solo se encontraron {len(datos_totales)} registros. Es muy poco, algo falló.")
-            # Debug: imprimir las primeras filas de c5 si falla
-            excel_raw.seek(0)
-            df_debug = pd.read_excel(excel_raw, sheet_name='c5', nrows=15, header=None, engine='xlrd')
-            print("\n🔍 DEBUG - Primeras filas de c5:")
-            print(df_debug.iloc[:, 0:2])
+            print(f"⚠️ Error: Solo se hallaron {len(datos_totales)} registros. Revisar c7 y c8.")
             
     except Exception as e:
         print(f"❌ Error crítico: {e}")
