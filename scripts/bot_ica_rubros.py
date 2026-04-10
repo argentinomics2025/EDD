@@ -56,17 +56,19 @@ def procesar_excel_radar(archivo_excel):
     
     paises_encontrados = set()
 
+    print(f"📋 Analizando {len(xl.sheet_names)} hojas con Radar de Celdas...")
+
     for sheet in xl.sheet_names:
         df = pd.read_excel(archivo_excel, sheet_name=sheet, header=None, engine='xlrd')
         padre_actual = None
-        tipo_flujo = "Exportacion" if any(x in sheet.lower() for x in ["c7", "c26", "c5"]) else "Importacion"
+        # Detectar si la hoja es de Expo o Impo
+        sheet_low = sheet.lower()
+        tipo_flujo = "Exportacion" if any(x in sheet_low for x in ["c7", "c26", "c5", "c3"]) else "Importacion"
 
         for index, row in df.iterrows():
-            if len(row) < 1 or pd.isna(row[0]): continue
-            
-            # --- 1. LÓGICA DE RUBROS ---
-            celda_0 = str(row[0]).strip().lower()
-            if len(celda_0) > 3 and "fuente" not in celda_0:
+            # --- 1. RUBROS ---
+            if len(row) > 0 and not pd.isna(row[0]):
+                celda_0 = str(row[0]).strip().lower()
                 for key, nombre_db in mapeo_padres.items():
                     if celda_0.startswith(key):
                         padre_actual = nombre_db
@@ -78,10 +80,12 @@ def procesar_excel_radar(archivo_excel):
                 if padre_actual and not any(celda_0.startswith(k) for k in mapeo_padres.keys()):
                     if len(row) > 1:
                         val = limpiar_numero(row[1])
-                        if val > 0: datos_rubros.append({"rubro_principal": padre_actual, "subrubro": str(row[0]).strip(), "valor_usd": val, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME})
+                        if val > 0 and len(celda_0) > 3:
+                            datos_rubros.append({"rubro_principal": padre_actual, "subrubro": str(row[0]).strip(), "valor_usd": val, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME})
 
-            # --- 2. LÓGICA DE PAÍSES (RADAR DE 3 COLUMNAS) ---
-            for col_idx in range(min(3, len(row))):
+            # --- 2. PAÍSES (RADAR HORIZONTAL) ---
+            for col_idx in range(min(4, len(row))):
+                if pd.isna(row[col_idx]): continue
                 celda_val = str(row[col_idx]).strip().lower()
                 celda_limpia = re.sub(r'\s*\(\d+\)', '', celda_val).strip()
                 
@@ -89,7 +93,6 @@ def procesar_excel_radar(archivo_excel):
                     if celda_limpia == clave or celda_limpia.startswith(clave + " "):
                         if nombre_real in paises_encontrados: continue 
                         
-                        # Escanear celdas a la derecha buscando 2 números (Expo e Impo)
                         numeros = []
                         for j in range(col_idx + 1, len(row)):
                             val = limpiar_numero(row[j])
@@ -108,7 +111,7 @@ def procesar_excel_radar(archivo_excel):
 
 if __name__ == "__main__":
     try:
-        print(f"🔍 Descargando Anexo y escaneando con Radar...")
+        print(f"🔍 Descargando Anexo...")
         resp = requests.get(EXCEL_URL, headers={'User-Agent': 'Mozilla/5.0'})
         archivo = BytesIO(resp.content)
         
@@ -117,7 +120,7 @@ if __name__ == "__main__":
         df_r = pd.DataFrame(rubros).drop_duplicates(subset=['rubro_principal', 'subrubro', 'tipo_flujo']) if rubros else pd.DataFrame()
         df_s = pd.DataFrame(socios).drop_duplicates(subset=['pais']) if socios else pd.DataFrame()
 
-        print(f"🚀 Resultados finales: {len(df_r)} rubros y {len(df_s)} países.")
+        print(f"🚀 Resultados: {len(df_r)} rubros y {len(df_s)} países.")
 
         if not df_r.empty:
             supabase.table("comex_rubros").delete().eq("fecha_informe", MES_INFORME).execute()
@@ -126,9 +129,7 @@ if __name__ == "__main__":
         if not df_s.empty:
             supabase.table("socios_comerciales").delete().eq("fecha_informe", MES_INFORME).execute()
             supabase.table("socios_comerciales").insert(df_s.to_dict('records')).execute()
-            print("✅ Países sincronizados exitosamente.")
-        else:
-            print("⚠️ No se encontraron países. El INDEC debe haber cambiado el formato del Cuadro 10/11.")
+            print("✅ Datos de socios comerciales actualizados correctamente.")
 
     except Exception as e:
         print(f"❌ Error Crítico: {e}")
