@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import requests
+import re
 from supabase import create_client, Client
 from io import BytesIO
 
@@ -75,14 +76,31 @@ if __name__ == "__main__":
         # 3. PAISES (c21)
         df_paises = pd.read_excel(archivo, sheet_name=HOJA_PAISES, header=None, engine='xlrd')
         paises_objetivo = ["Brasil", "China", "Estados Unidos", "Chile", "Paraguay", "Vietnam", "India", "Alemania"]
+        
+        # Diccionario temporal para acumular expo e impo correctamente
+        data_socios_temp = {p.lower(): {"pais": p, "exportaciones": 0.0, "importaciones": 0.0} for p in paises_objetivo}
+        
         for index, row in df_paises.iterrows():
-            if len(row) > 4 and not pd.isna(row[0]):
-                pais = str(row[0]).strip()
-                if any(p.lower() in pais.lower() for p in paises_objetivo):
-                    e = limpiar_numero(row[1]) # Columna Exportaciones
-                    i = limpiar_numero(row[4]) # Columna Importaciones (suele estar desplazada en esta hoja)
-                    if e > 0 or i > 0:
-                        socios_data.append({"pais": pais.title(), "exportaciones": e, "importaciones": i, "saldo_comercial": round(e-i, 2), "fecha_informe": MES_INFORME})
+            # Leer Exportaciones (Columna 0 es País, Columna 1 es Valor)
+            if len(row) > 1 and not pd.isna(row[0]):
+                pais_expo = str(row[0]).strip().lower()
+                for p_obj in paises_objetivo:
+                    if p_obj.lower() in pais_expo:
+                        data_socios_temp[p_obj.lower()]["exportaciones"] = limpiar_numero(row[1])
+            
+            # Leer Importaciones (Columna 4 es País, Columna 5 es Valor)
+            if len(row) > 5 and not pd.isna(row[4]):
+                pais_impo = str(row[4]).strip().lower()
+                for p_obj in paises_objetivo:
+                    if p_obj.lower() in pais_impo:
+                        data_socios_temp[p_obj.lower()]["importaciones"] = limpiar_numero(row[5])
+
+        # Convertir a la lista final calculando el saldo
+        for key, data in data_socios_temp.items():
+            if data["exportaciones"] > 0 or data["importaciones"] > 0:
+                data["saldo_comercial"] = round(data["exportaciones"] - data["importaciones"], 2)
+                data["fecha_informe"] = MES_INFORME
+                socios_data.append(data)
 
         # SUBIDA
         if rubros_data:
@@ -95,4 +113,5 @@ if __name__ == "__main__":
             supabase.table("socios_comerciales").insert(pd.DataFrame(socios_data).drop_duplicates().to_dict('records')).execute()
             print(f"✅ {len(socios_data)} Países actualizados.")
 
-    except Exception as e: print(f"❌ Error: {e}")
+    except Exception as e: 
+        print(f"❌ Error: {e}")
