@@ -5,7 +5,7 @@ from supabase import create_client, Client
 from io import BytesIO
 
 # ==============================================================================
-# ⚙️ CONFIGURACIÓN MENSUAL (FEBRERO 2026)
+# ⚙️ CONFIGURACIÓN MENSUAL
 # ==============================================================================
 MES_INFORME = "Febrero 2026"
 FECHA_DB = "2026-02-01" 
@@ -16,9 +16,7 @@ HOJA_IMPO = "c14"
 HOJA_PAISES = "c21"
 # ==============================================================================
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase: Client = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
 
 def limpiar_numero(val):
     if pd.isna(val): return 0.0
@@ -27,14 +25,15 @@ def limpiar_numero(val):
             val = val.strip().replace('\xa0', '').replace(' ', '').replace(',', '.')
             if val in ['-', '///', '', 's/d', '.']: return 0.0
         num = float(val)
-        if num > 1000000: num = num / 1000000.0
+        if num > 10000000: num = num / 1000000.0 # Corrección por si viene en unidades
         return round(num, 2)
     except: return 0.0
 
 def buscar_total_maestro(df):
     for idx, row in df.iterrows():
         celda = str(row[0]).strip().lower()
-        if celda == "total":
+        # Buscamos que CONTENGA "total", no que sea idéntico
+        if "total" in celda:
             return limpiar_numero(row[3]) # Columna D (Índice 3)
     return 0.0
 
@@ -46,7 +45,7 @@ def extraer_rubros(df, tipo_flujo, mapeo_padres):
         celda = str(row[0]).strip()
         celda_low = celda.lower()
         
-        if "fuente" in celda_low or celda_low == "total": continue
+        if "fuente" in celda_low or celda_low == "total" or celda_low == "total general": continue
 
         es_padre = False
         for key, nombre_db in mapeo_padres.items():
@@ -66,10 +65,10 @@ def extraer_rubros(df, tipo_flujo, mapeo_padres):
 if __name__ == "__main__":
     try:
         print(f"📥 Descargando archivo maestro...")
-        archivo = BytesIO(requests.get(EXCEL_URL, headers={'User-Agent': 'Mozilla/5.0'}).content)
-        xl = pd.ExcelFile(archivo, engine='xlrd')
+        resp = requests.get(EXCEL_URL, headers={'User-Agent': 'Mozilla/5.0'})
+        xl = pd.ExcelFile(BytesIO(resp.content), engine='xlrd')
         
-        # 1. TOTALES (c12 y c14)
+        # 1. TOTALES
         df_c12 = pd.read_excel(xl, HOJA_EXPO, header=None)
         df_c14 = pd.read_excel(xl, HOJA_IMPO, header=None)
         
@@ -87,7 +86,7 @@ if __name__ == "__main__":
         mapeo_impo = {"bienes de capital": "Bienes de capital (BK)", "bienes intermedios": "Bienes intermedios (BI)", "combustibles y lubricantes": "Combustibles y lubricantes (CyL)", "piezas y accesorios para bienes de capital": "Piezas y accesorios para bienes de capital (PyA)", "bienes de consumo": "Bienes de consumo (BC)", "vehículos automotores de pasajeros": "Vehículos automotores de pasajeros (VA)"}
         rubros_data.extend(extraer_rubros(df_c14, "Importacion", mapeo_impo))
 
-        # 3. PAÍSES (c21)
+        # 3. PAÍSES
         df_paises = pd.read_excel(xl, HOJA_PAISES, header=None)
         paises_objetivo = ["Brasil", "China", "Estados Unidos", "Chile", "Paraguay", "Vietnam", "India", "Alemania"]
         socios_data = []
@@ -109,11 +108,12 @@ if __name__ == "__main__":
                 data["fecha_informe"] = MES_INFORME
                 socios_data.append(data)
 
-        # 4. SUBIDA (CON UPSERT PARA EVITAR EL ERROR DE DUPLICADO)
+        # 4. SUBIDA LIMPIA (Borrar y Cargar)
         print("📤 Sincronizando con Supabase...")
         
-        # Sincronizar Totales
-        supabase.table("datos_comex").upsert({
+        # Sincronizar Totales (Borramos por fecha para evitar el error de Unique Constraint)
+        supabase.table("datos_comex").delete().eq("fecha", FECHA_DB).execute()
+        supabase.table("datos_comex").insert({
             "fecha": FECHA_DB,
             "exportaciones_usd_millions": t_expo,
             "importaciones_usd_millions": t_impo,
@@ -130,6 +130,6 @@ if __name__ == "__main__":
             supabase.table("socios_comerciales").delete().eq("fecha_informe", MES_INFORME).execute()
             supabase.table("socios_comerciales").insert(socios_data).execute()
 
-        print(f"✅ ¡Sincronización Total Exitosa para {MES_INFORME}!")
+        print(f"✅ ¡Sincronización Total Exitosa!")
 
     except Exception as e: print(f"❌ Error: {e}")
