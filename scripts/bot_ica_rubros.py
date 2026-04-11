@@ -5,7 +5,7 @@ from supabase import create_client, Client
 from io import BytesIO
 
 # ==============================================================================
-# ⚙️ CONFIGURACIÓN MENSUAL
+# ⚙️ CONFIGURACIÓN MENSUAL (FEBRERO 2026)
 # ==============================================================================
 MES_INFORME = "Febrero 2026"
 FECHA_DB = "2026-02-01" 
@@ -16,7 +16,9 @@ HOJA_IMPO = "c14"
 HOJA_PAISES = "c21"
 # ==============================================================================
 
-supabase: Client = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def limpiar_numero(val):
     if pd.isna(val): return 0.0
@@ -30,11 +32,10 @@ def limpiar_numero(val):
     except: return 0.0
 
 def buscar_total_maestro(df):
-    # Buscamos la fila donde la primera columna diga "Total"
     for idx, row in df.iterrows():
         celda = str(row[0]).strip().lower()
-        if "total" in celda:
-            return limpiar_numero(row[3]) # Columna D
+        if celda == "total":
+            return limpiar_numero(row[3]) # Columna D (Índice 3)
     return 0.0
 
 def extraer_rubros(df, tipo_flujo, mapeo_padres):
@@ -45,40 +46,40 @@ def extraer_rubros(df, tipo_flujo, mapeo_padres):
         celda = str(row[0]).strip()
         celda_low = celda.lower()
         
-        # Saltamos los totales y fuentes
-        if "fuente" in celda_low or celda_low == "total" or celda_low == "total general": continue
+        if "fuente" in celda_low or celda_low == "total": continue
 
         es_padre = False
         for key, nombre_db in mapeo_padres.items():
             if celda_low.startswith(key):
                 padre_actual = nombre_db
                 es_padre = True
-                val = limpiar_numero(row[3]) # Columna D (2026e)
+                val = limpiar_numero(row[3])
                 if val > 0: datos.append({"rubro_principal": nombre_db, "subrubro": "TOTAL", "valor_usd": val, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME})
                 break
         
         if padre_actual and not es_padre:
-            val = limpiar_numero(row[3]) # Columna D
-            if val > 0: datos.append({"rubro_principal": padre_actual, "subrubro": celda, "valor_usd": val, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME})
+            val = limpiar_numero(row[3])
+            if val > 0 and len(celda) > 3:
+                datos.append({"rubro_principal": padre_actual, "subrubro": celda, "valor_usd": val, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME})
     return datos
 
 if __name__ == "__main__":
     try:
-        print(f"📥 Descargando Excel del INDEC...")
+        print(f"📥 Descargando archivo maestro...")
         archivo = BytesIO(requests.get(EXCEL_URL, headers={'User-Agent': 'Mozilla/5.0'}).content)
         xl = pd.ExcelFile(archivo, engine='xlrd')
         
-        # --- 1. TOTALES MAESTROS ---
+        # 1. TOTALES (c12 y c14)
         df_c12 = pd.read_excel(xl, HOJA_EXPO, header=None)
         df_c14 = pd.read_excel(xl, HOJA_IMPO, header=None)
         
-        total_expo = buscar_total_maestro(df_c12)
-        total_impo = buscar_total_maestro(df_c14)
-        saldo = round(total_expo - total_impo, 2)
+        t_expo = buscar_total_maestro(df_c12)
+        t_impo = buscar_total_maestro(df_c14)
+        saldo = round(t_expo - t_impo, 2)
         
-        print(f"📊 Totales Detectados: Expo {total_expo} | Impo {total_impo} | Saldo {saldo}")
+        print(f"📊 Totales Detectados: Expo {t_expo} | Impo {t_impo} | Saldo {saldo}")
 
-        # --- 2. RUBROS ---
+        # 2. RUBROS
         rubros_data = []
         mapeo_expo = {"productos primarios": "Productos primarios (PP)", "manufacturas de origen agropecuario": "Manufacturas de origen agropecuario (MOA)", "manufacturas de origen industrial": "Manufacturas de origen industrial (MOI)", "combustibles y energía": "Combustibles y energía (CyE)"}
         rubros_data.extend(extraer_rubros(df_c12, "Exportacion", mapeo_expo))
@@ -86,20 +87,20 @@ if __name__ == "__main__":
         mapeo_impo = {"bienes de capital": "Bienes de capital (BK)", "bienes intermedios": "Bienes intermedios (BI)", "combustibles y lubricantes": "Combustibles y lubricantes (CyL)", "piezas y accesorios para bienes de capital": "Piezas y accesorios para bienes de capital (PyA)", "bienes de consumo": "Bienes de consumo (BC)", "vehículos automotores de pasajeros": "Vehículos automotores de pasajeros (VA)"}
         rubros_data.extend(extraer_rubros(df_c14, "Importacion", mapeo_impo))
 
-        # --- 3. PAÍSES (REPARADO) ---
+        # 3. PAÍSES (c21)
         df_paises = pd.read_excel(xl, HOJA_PAISES, header=None)
-        paises_obj = ["Brasil", "China", "Estados Unidos", "Chile", "Paraguay", "Vietnam", "India", "Alemania"]
+        paises_objetivo = ["Brasil", "China", "Estados Unidos", "Chile", "Paraguay", "Vietnam", "India", "Alemania"]
         socios_data = []
-        temp_p = {p.lower(): {"pais": p, "exportaciones": 0.0, "importaciones": 0.0} for p in paises_obj}
+        temp_p = {p.lower(): {"pais": p, "exportaciones": 0.0, "importaciones": 0.0} for p in paises_objetivo}
         
         for index, row in df_paises.iterrows():
             if len(row) > 1 and not pd.isna(row[0]):
                 p_e = str(row[0]).strip().lower()
-                for p in paises_obj:
+                for p in paises_objetivo:
                     if p.lower() in p_e: temp_p[p.lower()]["exportaciones"] = limpiar_numero(row[1])
             if len(row) > 5 and not pd.isna(row[4]):
                 p_i = str(row[4]).strip().lower()
-                for p in paises_obj:
+                for p in paises_objetivo:
                     if p.lower() in p_i: temp_p[p.lower()]["importaciones"] = limpiar_numero(row[5])
 
         for data in temp_p.values():
@@ -108,27 +109,27 @@ if __name__ == "__main__":
                 data["fecha_informe"] = MES_INFORME
                 socios_data.append(data)
 
-        # --- 4. CARGA SEGURA ---
-        print("📤 Subiendo a Supabase...")
+        # 4. SUBIDA (CON UPSERT PARA EVITAR EL ERROR DE DUPLICADO)
+        print("📤 Sincronizando con Supabase...")
         
-        # A. datos_comex (Usa upsert para evitar error de duplicado)
+        # Sincronizar Totales
         supabase.table("datos_comex").upsert({
             "fecha": FECHA_DB,
-            "exportaciones_usd_millions": total_expo,
-            "importaciones_usd_millions": total_impo,
+            "exportaciones_usd_millions": t_expo,
+            "importaciones_usd_millions": t_impo,
             "saldo_usd_millions": saldo
         }).execute()
         
-        # B. comex_rubros
+        # Sincronizar Rubros
         if rubros_data:
             supabase.table("comex_rubros").delete().eq("fecha_informe", MES_INFORME).execute()
             supabase.table("comex_rubros").insert(rubros_data).execute()
             
-        # C. socios_comerciales
+        # Sincronizar Socios
         if socios_data:
             supabase.table("socios_comerciales").delete().eq("fecha_informe", MES_INFORME).execute()
             supabase.table("socios_comerciales").insert(socios_data).execute()
 
-        print(f"✅ ¡Sincronización Total Exitosa!")
+        print(f"✅ ¡Sincronización Total Exitosa para {MES_INFORME}!")
 
     except Exception as e: print(f"❌ Error: {e}")
