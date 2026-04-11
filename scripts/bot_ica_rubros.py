@@ -33,7 +33,6 @@ def extraer_datos_rubros(df, tipo_flujo, mapeo_padres):
     datos = []
     padre_actual = None
     for index, row in df.iterrows():
-        # En Cuadros 12/14: Col B (index 1) es Rubro, Col C (index 2) es Subrubro, Col D (index 3) es Valor
         rubro_col = str(row[1]).strip() if not pd.isna(row[1]) else ""
         subrubro_col = str(row[2]).strip() if not pd.isna(row[2]) else ""
         valor = limpiar_numero(row[3])
@@ -70,16 +69,16 @@ if __name__ == "__main__":
         df_c12 = pd.read_excel(xl, HOJA_EXPO, header=None)
         df_c14 = pd.read_excel(xl, HOJA_IMPO, header=None)
         
-        # Buscamos la fila "Total" en la columna B (index 1)
+        # CORRECCIÓN: Buscamos la fila "Total" en la columna A (índice 0)
         total_expo = 0.0
         for i, r in df_c12.iterrows():
-            if str(r[1]).strip().lower() == "total": 
+            if not pd.isna(r[0]) and "total" in str(r[0]).strip().lower(): 
                 total_expo = limpiar_numero(r[3])
                 break
         
         total_impo = 0.0
         for i, r in df_c14.iterrows():
-            if str(r[1]).strip().lower() == "total general": 
+            if not pd.isna(r[0]) and "total" in str(r[0]).strip().lower(): 
                 total_impo = limpiar_numero(r[3])
                 break
         
@@ -112,15 +111,28 @@ if __name__ == "__main__":
                 d["fecha_informe"] = MES_INFORME
                 socios_data.append(d)
 
-        # --- 4. SUBIDA ---
+        # --- 4. SUBIDA (CON BORRADO PREVIO PARA EVITAR ERROR UNIQUE) ---
         print("📤 Subiendo datos finales...")
-        supabase.table("datos_comex").upsert({"fecha": FECHA_DB, "exportaciones_usd_millions": total_expo, "importaciones_usd_millions": total_impo, "saldo_usd_millions": saldo}).execute()
+        
+        # Tabla datos_comex
+        supabase.table("datos_comex").delete().eq("fecha", FECHA_DB).execute()
+        supabase.table("datos_comex").insert({
+            "fecha": FECHA_DB, 
+            "exportaciones_usd_millions": total_expo, 
+            "importaciones_usd_millions": total_impo, 
+            "saldo_usd_millions": saldo
+        }).execute()
+        
+        # Tabla comex_rubros
         if rubros_data:
             supabase.table("comex_rubros").delete().eq("fecha_informe", MES_INFORME).execute()
             supabase.table("comex_rubros").insert(rubros_data).execute()
+            
+        # Tabla socios_comerciales
         if socios_data:
             supabase.table("socios_comerciales").delete().eq("fecha_informe", MES_INFORME).execute()
             supabase.table("socios_comerciales").insert(socios_data).execute()
         
-        print(f"✅ ¡ÉXITO! {len(rubros_data)} rubros cargados.")
-    except Exception as e: print(f"❌ Error: {e}")
+        print(f"✅ ¡ÉXITO! Totales, {len(rubros_data)} rubros y socios cargados.")
+    except Exception as e: 
+        print(f"❌ Error: {e}")
