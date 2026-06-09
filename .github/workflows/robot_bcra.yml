@@ -4,24 +4,27 @@ on:
   workflow_dispatch: 
   
   schedule:
+    # Se ejecuta todos los días a las 23:00 UTC (20:00 hora de Argentina)
     - cron: '0 23 * * *'
 
 jobs:
   actualizar-bcra:
+    name: Extraer Datos BCRA
     runs-on: ubuntu-latest
 
     steps:
     - name: Descargar el código
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Configurar Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
     - name: Instalar librerías
       run: |
-        pip install supabase requests urllib3 cloudscraper
+        python -m pip install --upgrade pip
+        pip install supabase requests
 
     - name: Ejecutar Robot del BCRA
       env:
