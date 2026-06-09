@@ -15,7 +15,10 @@ URL = os.environ.get("SUPABASE_URL")
 KEY = os.environ.get("SUPABASE_KEY")
 
 if not URL or not KEY:
-    raise Exception("❌ ERROR: Faltan las claves de Supabase.")
+    raise ValueError("❌ ERROR: Faltan las claves de Supabase en Secrets.")
+
+# Instancia global única
+supabase = create_client(URL, KEY)
 
 TARGETS = ['AL29', 'AL30', 'AL35', 'AE38', 'GD29', 'GD30', 'GD35', 'GD38', 'GD41',
            'AL29D', 'AL30D', 'AL35D', 'AE38D', 'GD29D', 'GD30D', 'GD35D', 'GD38D', 'GD41D']
@@ -36,7 +39,7 @@ BONDS_INFO = {
 def parse_num(texto):
     try:
         return float(texto.replace('$', '').replace('%', '').replace('.', '').replace(',', '.').strip())
-    except:
+    except ValueError:
         return 0.0
 
 def calcular_tir(precio_usd, base_ticker):
@@ -60,19 +63,20 @@ def run():
     print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] 👁️ Iniciando Robot Matemático Auténtico...")
     
     options = Options()
-    options.add_argument("--headless")
+    options.add_argument("--headless=new") # Argumento moderno para headless
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
+    driver = None
     try:
         driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         driver.get("https://www.rava.com/cotizaciones/bonos")
         
         print("⏳ Extrayendo cotizaciones de Rava...")
         WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "table")))
-        time.sleep(5)
+        time.sleep(5) # Pausa necesaria para que el JS de Rava termine de renderizar los números
         
         filas = driver.find_elements(By.TAG_NAME, "tr")
         
@@ -94,17 +98,16 @@ def run():
                             "var_ano": parse_num(cols[4].text),
                         })
                         
-                        # EL ARREGLO ESTÁ ACÁ: Cortamos solo la última letra
+                        # Guardamos referencia del precio en USD para calcular la TIR de los en pesos
                         if ticker.endswith('D'):
                             precios_usd[ticker[:-1]] = precio
-            except:
+            except Exception:
+                # Ignoramos filas rotas o encabezados que no cumplen la estructura
                 continue
                 
         datos_finales = []
         for d in datos_crudos:
             ticker = d['ticker']
-            
-            # Y ACÁ: Cortamos solo la última letra para saber cuál es el bono base
             base = ticker[:-1] if ticker.endswith('D') else ticker
             
             precio_usd_referencia = precios_usd.get(base, 0.0)
@@ -120,14 +123,19 @@ def run():
             print(f"   ✅ {ticker}: $ {d['precio']:,.2f} | TIR Calculada: {tir}% | Dur: {duration}")
 
         if datos_finales:
-            supabase = create_client(URL, KEY)
             supabase.table('historial_bonos').upsert(datos_finales, on_conflict='ticker').execute()
             print(f"\n🚀 ¡LISTO! {len(datos_finales)} bonos guardados con el motor matemático.")
-            
-        driver.quit()
+        else:
+            print("\n⚠️ No se encontraron cotizaciones para los bonos objetivo.")
 
     except Exception as e:
-        print(f"❌ Error General: {e}")
+        print(f"❌ Error General de Extracción: {e}")
+        
+    finally:
+        # Aseguramos de matar el proceso del navegador aunque el script falle en el medio
+        if driver is not None:
+            driver.quit()
+            print("🧹 Navegador cerrado y recursos liberados.")
 
 if __name__ == "__main__":
     run()
