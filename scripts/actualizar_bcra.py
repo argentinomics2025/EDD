@@ -8,7 +8,7 @@ URL = os.environ.get("SUPABASE_URL")
 KEY = os.environ.get("SUPABASE_KEY")
 
 if not URL or not KEY:
-    raise Exception("❌ Faltan las credenciales de Supabase")
+    raise ValueError("❌ ERROR: Faltan las credenciales SUPABASE_URL o SUPABASE_KEY en los Secrets de GitHub.")
 
 supabase = create_client(URL, KEY)
 
@@ -20,56 +20,56 @@ def run():
     
     try:
         r = requests.get(GOOGLE_PROXY_URL, timeout=30)
+        r.raise_for_status() # Frena acá si Google devuelve un error 500 o 404
         
-        if r.status_code == 200:
-            data = r.json()
-            resultados = data.get('results', [])
+        data = r.json()
+        resultados = data.get('results', [])
+        
+        # 1: Reservas, 15: Base Monetaria, 16: Circulante, 34/7: Tasa PM / BADLAR, 31: UVA
+        ids_objetivo = [1, 15, 16, 34, 7, 31] 
+        guardados = 0
+        
+        for item in resultados:
+            id_var = item.get('idVariable')
             
-            # 1: Reservas, 15: Base Monetaria, 16: Circulante, 34/7: Tasa PM / BADLAR, 31: UVA
-            ids_objetivo = [1, 15, 16, 34, 7, 31] 
-            guardados = 0
-            
-            for item in resultados:
-                id_var = item.get('idVariable')
+            if id_var in ids_objetivo:
+                desc = item.get('descripcion', '')
                 
-                if id_var in ids_objetivo:
-                    desc = item.get('descripcion', '')
-                    
-                    # Usamos las etiquetas nuevas de la v4.0
-                    fecha = item.get('ultFechaInformada')
-                    valor = item.get('ultValorInformado')
-                    
-                    if valor is not None:
-                        print(f"   ✅ Guardando: {desc} | Valor: {valor} | Fecha: {fecha}")
+                # Usamos las etiquetas nuevas de la v4.0
+                fecha = item.get('ultFechaInformada')
+                valor = item.get('ultValorInformado')
+                
+                if valor is not None:
+                    print(f"   ✅ Guardando: {desc} | Valor: {valor} | Fecha: {fecha}")
 
-                        # 1. ACTUALIZAR LA PIZARRA (Para las tarjetas - Pisa el dato viejo)
-                        supabase.table('bcra_data').upsert({
+                    # 1. ACTUALIZAR LA PIZARRA (Para las tarjetas - Pisa el dato viejo)
+                    supabase.table('bcra_data').upsert({
+                        'id_variable': id_var,
+                        'descripcion': desc,
+                        'fecha': fecha,
+                        'valor': valor,
+                        'last_updated': datetime.datetime.now().isoformat()
+                    }).execute()
+
+                    # 2. GUARDAR EN EL ARCHIVO HISTÓRICO (Para el Gráfico - Acumula los datos)
+                    # Nota: Requiere que hayas creado la tabla 'historial_bcra' con UNIQUE(id_variable, fecha)
+                    try:
+                        supabase.table('historial_bcra').upsert({
                             'id_variable': id_var,
-                            'descripcion': desc,
                             'fecha': fecha,
-                            'valor': valor,
-                            'last_updated': datetime.datetime.now().isoformat()
-                        }).execute()
+                            'valor': valor
+                        }, on_conflict='id_variable,fecha').execute()
+                    except Exception as e:
+                        print(f"      ⚠️ Aviso al guardar historial (posible duplicado ignorado): {e}")
 
-                        # 2. GUARDAR EN EL ARCHIVO HISTÓRICO (Para el Gráfico - Acumula los datos)
-                        # Nota: Requiere que hayas creado la tabla 'historial_bcra' con UNIQUE(id_variable, fecha)
-                        try:
-                            supabase.table('historial_bcra').upsert({
-                                'id_variable': id_var,
-                                'fecha': fecha,
-                                'valor': valor
-                            }, on_conflict='id_variable,fecha').execute()
-                        except Exception as e:
-                            print(f"      ⚠️ Aviso historial: {e}")
-
-                        guardados += 1
-                    
-            print(f"🚀 ¡Hack mate al BCRA! Circuito completado con éxito. Se procesaron {guardados} variables.")
-        else:
-            print(f"⚠️ Error al consultar el Proxy de Google: HTTP {r.status_code}")
+                    guardados += 1
+        
+        print(f"🚀 ¡Hack mate al BCRA! Circuito completado con éxito. Se procesaron {guardados} variables.")
             
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ Error de red al consultar el Proxy de Google: {e}")
     except Exception as e:
-        print(f"❌ Error General: {e}")
+        print(f"❌ Error General inesperado: {e}")
 
 if __name__ == '__main__':
     run()
