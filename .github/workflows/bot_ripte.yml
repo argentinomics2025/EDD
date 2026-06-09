@@ -9,6 +9,7 @@ on:
 
 jobs:
   actualizar-ripte:
+    name: Procesar Datos de Salarios
     runs-on: ubuntu-latest
 
     steps:
@@ -27,7 +28,7 @@ jobs:
 
       - name: 🚀 Ejecutar Robot de Salarios
         env:
-          # Usamos los mismos secretos que ya tenés configurados en GitHub para los otros bots
+          TZ: 'America/Argentina/Buenos_Aires'
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python scripts/bot_ripte.py
