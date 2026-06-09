@@ -16,16 +16,23 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("⚠️ Faltan las credenciales de Supabase en las variables de entorno.")
+    raise ValueError("⚠️ ERROR CRÍTICO: Faltan las credenciales de Supabase en las variables de entorno.")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# --- CABECERAS GLOBALES ---
+DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
 def descargar_excel():
     print(f"🔍 Descargando el Excel del INDEC para {MES_INFORME}...")
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    response = requests.get(EXCEL_URL, headers=headers)
-    response.raise_for_status()
-    return BytesIO(response.content)
+    try:
+        response = requests.get(EXCEL_URL, headers=DEFAULT_HEADERS, timeout=30)
+        response.raise_for_status()
+        return BytesIO(response.content)
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Error descargando el archivo del INDEC: {e}")
 
 # 🛡️ SUPER LIMPIADOR DE NÚMEROS
 def limpiar_numero(val):
@@ -51,11 +58,10 @@ def limpiar_numero(val):
     except ValueError:
         return 0.0
 
-def detectar_pestana_totales(excel_bytes):
+def detectar_pestana_totales(xl_file):
     print("🐕‍𦦙 Rastreando la pestaña de Totales por País...")
-    xl = pd.ExcelFile(excel_bytes, engine='xlrd')
-    for sheet in xl.sheet_names:
-        df_temp = pd.read_excel(excel_bytes, sheet_name=sheet, nrows=15, header=None, engine='xlrd')
+    for sheet in xl_file.sheet_names:
+        df_temp = pd.read_excel(xl_file, sheet_name=sheet, nrows=15, header=None)
         if df_temp.empty:
             continue
         texto_hoja = df_temp.astype(str).apply(lambda x: ' '.join(x), axis=1).str.lower().str.cat(sep=' ')
@@ -64,13 +70,13 @@ def detectar_pestana_totales(excel_bytes):
             return sheet
     return None
 
-def obtener_totales_ica(excel_bytes, sheet_name):
+def obtener_totales_ica(xl_file, sheet_name):
     if not sheet_name:
         return []
         
-    print(f"📊 Extrayendo columnas de Expo e Impo (Modo Anti-Títulos)...")
-    # MAGIA ACÁ: header=None evita que Pandas se coma a China como si fuera un título
-    df = pd.read_excel(excel_bytes, sheet_name=sheet_name, header=None, skiprows=5, engine='xlrd')
+    print("📊 Extrayendo columnas de Expo e Impo (Modo Anti-Títulos)...")
+    # Usamos el objeto xl_file ya cargado en memoria, es más eficiente
+    df = pd.read_excel(xl_file, sheet_name=sheet_name, header=None, skiprows=5)
     
     if len(df.columns) < 6:
         print("❌ Pestaña con formato incorrecto. No hay suficientes columnas.")
@@ -117,17 +123,27 @@ def obtener_totales_ica(excel_bytes, sheet_name):
 
 def subir_totales_a_supabase(datos):
     if not datos:
+        print("⚠️ No hay datos válidos para subir a Supabase.")
         return
-    print(f"🚀 Subiendo {len(datos)} PAÍSES a Supabase para {MES_INFORME}...")
-    supabase.table("socios_comerciales").delete().eq("fecha_informe", MES_INFORME).execute()
-    supabase.table("socios_comerciales").insert(datos).execute()
+        
+    print(f"\n🚀 Subiendo {len(datos)} PAÍSES a Supabase para {MES_INFORME}...")
+    try:
+        supabase.table("socios_comerciales").delete().eq("fecha_informe", MES_INFORME).execute()
+        supabase.table("socios_comerciales").insert(datos).execute()
+        print("✅✅ ¡Sincronización completada! China DEBE estar en el recuadro de IMPO ahora. ✅✅")
+    except Exception as e:
+        print(f"❌ Error al guardar en Supabase: {e}")
 
 if __name__ == "__main__":
     try:
-        archivo_excel = descargar_excel()
-        pestana_correcta = detectar_pestana_totales(archivo_excel)
-        totales = obtener_totales_ica(archivo_excel, pestana_correcta)
+        archivo_bytes = descargar_excel()
+        
+        # Cargar el motor de Excel una sola vez ahorra memoria y evita problemas de puntero
+        xl_file = pd.ExcelFile(archivo_bytes, engine='xlrd')
+        
+        pestana_correcta = detectar_pestana_totales(xl_file)
+        totales = obtener_totales_ica(xl_file, pestana_correcta)
         subir_totales_a_supabase(totales)
-        print("✅✅ ¡Sincronización completada! China DEBE estar en el recuadro de IMPO ahora. ✅✅")
+        
     except Exception as e:
         print(f"❌ Error crítico general: {e}")
