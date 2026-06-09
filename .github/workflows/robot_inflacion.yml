@@ -1,26 +1,28 @@
-name: 🛒 Robot Inflación (INDEC)
+name: 🛒 Robot Inflación (INDEC/BCRA)
 
 on:
   workflow_dispatch: 
   schedule:
-    - cron: '30 20 * * *' # Corre a las 17:30 hs Argentina todos los días
+    - cron: '30 20 * * *' # Corre a las 17:30 hs Argentina (20:30 UTC) todos los días
 
 jobs:
   actualizar-inflacion:
+    name: Sincronizar Inflación
     runs-on: ubuntu-latest
 
     steps:
     - name: Descargar el código
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Configurar Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
     - name: Instalar librerías
       run: |
-        pip install supabase requests
+        python -m pip install --upgrade pip
+        pip install supabase requests urllib3
 
     - name: Ejecutar Robot
       env:
