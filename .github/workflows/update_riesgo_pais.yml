@@ -5,12 +5,11 @@ on:
     # Se ejecuta a las 21:00 UTC, que son las 18:00 hs en Argentina (Cierre de mercado).
     # Los días 1-5 significan de Lunes a Viernes.
     - cron: '0 21 * * 1-5'
-  
-  # Este comando te permite ejecutar el bot manualmente desde GitHub cuando quieras
   workflow_dispatch: 
 
 jobs:
-  update-data:
+  update-riesgo-pais:
+    name: Extraer Riesgo País
     runs-on: ubuntu-latest
 
     steps:
@@ -29,7 +28,7 @@ jobs:
 
       - name: Ejecutar Script de Riesgo País
         env:
-          # Usa los secretos que ya tenés configurados en tu repo de GitHub
+          TZ: 'America/Argentina/Buenos_Aires'
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python scripts/update_riesgo_pais.py
