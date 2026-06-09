@@ -5,7 +5,7 @@ from supabase import create_client, Client
 from io import BytesIO
 
 # ==============================================================================
-# ⚙️ CONFIGURACIÓN FEBRERO 2026
+# ⚙️ CONFIGURACIÓN DEL MES (Actualizar a mano cada vez que sale el informe)
 # ==============================================================================
 MES_INFORME = "Febrero 2026"
 FECHA_DB = "2026-02-01" 
@@ -16,7 +16,18 @@ HOJA_IMPO = "c14"
 HOJA_PAISES = "c21"
 # ==============================================================================
 
-supabase: Client = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("❌ ERROR CRÍTICO: Faltan las credenciales de Supabase en Secrets.")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# --- CABECERAS GLOBALES ---
+DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
 
 def limpiar_numero(val):
     if pd.isna(val): return 0.0
@@ -27,7 +38,8 @@ def limpiar_numero(val):
         num = float(val)
         if num > 10000000: num = num / 1000000.0
         return round(num, 2)
-    except: return 0.0
+    except ValueError:
+        return 0.0
 
 def extraer_datos_rubros(df, tipo_flujo, mapeo_padres):
     datos = []
@@ -62,14 +74,16 @@ def extraer_datos_rubros(df, tipo_flujo, mapeo_padres):
 if __name__ == "__main__":
     try:
         print(f"📥 Descargando {EXCEL_URL}...")
-        resp = requests.get(EXCEL_URL, headers={'User-Agent': 'Mozilla/5.0'})
+        resp = requests.get(EXCEL_URL, headers=DEFAULT_HEADERS, timeout=30)
+        resp.raise_for_status()
+        
+        # Cargamos el Excel en memoria una sola vez
         xl = pd.ExcelFile(BytesIO(resp.content), engine='xlrd')
         
         # --- 1. TOTALES MAESTROS ---
         df_c12 = pd.read_excel(xl, HOJA_EXPO, header=None)
         df_c14 = pd.read_excel(xl, HOJA_IMPO, header=None)
         
-        # CORRECCIÓN: Buscamos la fila "Total" en la columna A (índice 0)
         total_expo = 0.0
         for i, r in df_c12.iterrows():
             if not pd.isna(r[0]) and "total" in str(r[0]).strip().lower(): 
@@ -98,6 +112,7 @@ if __name__ == "__main__":
         paises_obj = ["Brasil", "China", "Estados Unidos", "Chile", "Paraguay", "Vietnam", "India", "Alemania"]
         socios_data = []
         temp_p = {p.lower(): {"pais": p, "exportaciones": 0.0, "importaciones": 0.0} for p in paises_obj}
+        
         for idx, row in df_paises.iterrows():
             p_e_name = str(row[0]).strip().lower() if not pd.isna(row[0]) else ""
             p_i_name = str(row[4]).strip().lower() if not pd.isna(row[4]) else ""
@@ -112,7 +127,7 @@ if __name__ == "__main__":
                 socios_data.append(d)
 
         # --- 4. SUBIDA (CON BORRADO PREVIO PARA EVITAR ERROR UNIQUE) ---
-        print("📤 Subiendo datos finales...")
+        print("\n📤 Subiendo datos finales...")
         
         # Tabla datos_comex
         supabase.table("datos_comex").delete().eq("fecha", FECHA_DB).execute()
@@ -134,5 +149,8 @@ if __name__ == "__main__":
             supabase.table("socios_comerciales").insert(socios_data).execute()
         
         print(f"✅ ¡ÉXITO! Totales, {len(rubros_data)} rubros y socios cargados.")
+        
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ Error de red descargando el Excel: {e}")
     except Exception as e: 
-        print(f"❌ Error: {e}")
+        print(f"❌ Error crítico general: {e}")
