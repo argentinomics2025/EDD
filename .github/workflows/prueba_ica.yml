@@ -1,11 +1,13 @@
 name: 🌎 Probar Bot ICA
 
 on:
-  workflow_dispatch: # Botón manual en la pestaña Actions
+  workflow_dispatch: # Ejecución puramente manual para cuando actualices el Panel de Control
 
 jobs:
   correr-bot:
+    name: Extraer Excel Socios Comerciales
     runs-on: ubuntu-latest
+    
     steps:
       - name: Traer el código del repositorio
         uses: actions/checkout@v4
@@ -17,10 +19,12 @@ jobs:
 
       - name: Instalar librerías necesarias
         run: |
+          python -m pip install --upgrade pip
           pip install pandas requests supabase xlrd openpyxl
 
       - name: Ejecutar el script de Python
         env:
+          TZ: 'America/Argentina/Buenos_Aires'
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python scripts/bot_ica.py
