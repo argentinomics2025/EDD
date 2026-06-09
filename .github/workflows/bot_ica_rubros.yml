@@ -1,14 +1,11 @@
 name: 🤖 Bot ICA Rubros (Comex Detalle)
 
 on:
-  schedule:
-    # Se ejecuta el día 22 de cada mes a las 10:00 AM UTC (7:00 AM Arg)
-    # Le damos un par de días de changüí después del 20 por si el INDEC se demora
-    - cron: '0 10 22 * *'
-  workflow_dispatch: # El botón mágico para correrlo a mano
+  workflow_dispatch: # EL BOTÓN MÁGICO. Solo manual, porque el script requiere actualización de URL cada mes.
 
 jobs:
   actualizar-rubros:
+    name: Procesar Excel INDEC
     runs-on: ubuntu-latest
 
     steps:
@@ -27,7 +24,7 @@ jobs:
 
       - name: 🚀 Ejecutar Robot de Rubros
         env:
-          # Usa las mismas llaves secretas que ya tenés guardadas
+          TZ: 'America/Argentina/Buenos_Aires'
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python scripts/bot_ica_rubros.py
