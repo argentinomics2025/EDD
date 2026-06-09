@@ -8,22 +8,26 @@ on:
 
 jobs:
   actualizar_comex:
+    name: Procesar Datos ICA
     runs-on: ubuntu-latest
+    
     steps:
       - name: Chequear código
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configurar Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
       - name: Instalar librerías
-        run: pip install pandas requests supabase
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas requests supabase
 
       - name: Ejecutar script COMEX
         env:
+          TZ: 'America/Argentina/Buenos_Aires'
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        # ACÁ ESTÁ LA MAGIA: Le sumamos "scripts/" a la ruta
         run: python scripts/bot_comex.py
