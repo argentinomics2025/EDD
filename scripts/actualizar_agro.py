@@ -9,18 +9,25 @@ URL = os.environ.get("SUPABASE_URL")
 KEY = os.environ.get("SUPABASE_KEY")
 
 if not URL or not KEY:
-    raise Exception("❌ ERROR: Faltan las claves de Supabase en Secrets.")
+    raise ValueError("❌ ERROR CRÍTICO: Faltan las variables de entorno SUPABASE_URL o SUPABASE_KEY en GitHub Secrets.")
 
 supabase = create_client(URL, KEY)
 
+# --- CONFIGURACIÓN DE HEADERS ---
+# Un User-Agent moderno es clave para evitar bloqueos (403 Forbidden) al scrapear
+DEFAULT_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Cache-Control': 'no-cache'
+}
+
 def obtener_dolar_mayorista():
     try:
-        r = requests.get("https://dolarapi.com/v1/dolares/mayorista", timeout=10)
-        if r.status_code == 200:
-            return float(r.json().get('venta', 1050))
-    except:
-        pass
-    return 1050.0
+        r = requests.get("https://dolarapi.com/v1/dolares/mayorista", timeout=10, headers=DEFAULT_HEADERS)
+        r.raise_for_status()
+        return float(r.json().get('venta', 1050))
+    except Exception as e:
+        print(f"⚠️ Error obteniendo dólar mayorista de la API, usando fallback (1050.0). Detalle: {e}")
+        return 1050.0
 
 def buscar_precio(texto, cultivo):
     patron = rf"{cultivo}.{{0,150}}?\$?\s*([0-9]{{1,3}}(?:\.[0-9]{{3}})*(?:,[0-9]+)?)"
@@ -29,7 +36,8 @@ def buscar_precio(texto, cultivo):
         numero_limpio = match.group(1).replace('.', '').replace(',', '.')
         try:
             return float(numero_limpio)
-        except:
+        except Exception as e:
+            print(f"⚠️ Error parseando el número encontrado para {cultivo}: {e}")
             return 0.0
     return 0.0
 
@@ -40,9 +48,9 @@ def obtener_precio_chicago(ticker, multiplicador_bushels):
     Lo convertimos a Dólares por Tonelada Métrica (US$/MT).
     """
     url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}"
-    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
-        r = requests.get(url, headers=headers, timeout=10)
+        r = requests.get(url, headers=DEFAULT_HEADERS, timeout=10)
+        r.raise_for_status()
         data = r.json()
         precio_centavos = data['chart']['result'][0]['meta']['regularMarketPrice']
         
@@ -50,7 +58,7 @@ def obtener_precio_chicago(ticker, multiplicador_bushels):
         precio_usd_ton = (precio_centavos / 100) * multiplicador_bushels
         return round(precio_usd_ton, 2)
     except Exception as e:
-        print(f"Error consultando Chicago ({ticker}): {e}")
+        print(f"❌ Error consultando Chicago para el ticker {ticker}: {e}")
         return 0.0
 
 def run():
@@ -64,13 +72,9 @@ def run():
     # ==========================================
     # 1. PIZARRA ROSARIO (MERCADO LOCAL)
     # ==========================================
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Cache-Control': 'no-cache'
-    }
     try:
         print("\n⏳ Obteniendo datos oficiales de la Cámara Arbitral (Rosario)...")
-        respuesta = requests.get('https://www.cac.bcr.com.ar/es/precios-de-pizarra', headers=headers, timeout=20)
+        respuesta = requests.get('https://www.cac.bcr.com.ar/es/precios-de-pizarra', headers=DEFAULT_HEADERS, timeout=20)
         respuesta.raise_for_status()
         
         texto_sin_tags = re.sub(r'<[^>]+>', ' ', respuesta.text)
@@ -89,9 +93,9 @@ def run():
                 datos_guardar.append({"fecha": hoy, "grano": grano, "mercado": "rosario", "precio": precio_ars})
                 datos_guardar.append({"fecha": hoy, "grano": grano, "mercado": "rosario_usd", "precio": precio_usd})
                 print(f"   🇦🇷 {grano.upper()}: $ {precio_ars:,.2f} | u$s {precio_usd:,.2f}")
-                
+            
     except Exception as e:
-        print(f"❌ Error en mercado local: {e}")
+        print(f"❌ Error crítico procesando el mercado local (Rosario): {e}")
 
     # ==========================================
     # 2. BOLSA DE CHICAGO (MERCADO INTERNACIONAL)
@@ -101,7 +105,7 @@ def run():
         'soja': obtener_precio_chicago('ZS=F', 36.7437),  # ZS = Soybean Futures
         'maiz': obtener_precio_chicago('ZC=F', 39.3682),  # ZC = Corn Futures
         'trigo': obtener_precio_chicago('ZW=F', 36.7437), # ZW = Wheat Futures
-        'girasol': 0.0 # Rotterdam no tiene ticker público gratuito fácil. Tu web mostrará "-" automáticamente.
+        'girasol': 0.0 # Rotterdam no tiene ticker público gratuito fácil.
     }
 
     for grano, precio_usd in precios_internacionales.items():
@@ -123,9 +127,9 @@ def run():
             supabase.table('datos_agro').insert(datos_guardar).execute()
             print(f"🚀 ¡COSECHA TERMINADA! {len(datos_guardar)} registros guardados en Supabase.")
         except Exception as e:
-            print(f"❌ Error guardando en Supabase: {e}")
+            print(f"❌ Error de base de datos guardando en Supabase: {e}")
     else:
-        print("⚠️ No se encontraron precios para guardar hoy.")
+        print("\n⚠️ No se encontraron precios válidos para guardar el día de hoy.")
 
 if __name__ == "__main__":
     run()
