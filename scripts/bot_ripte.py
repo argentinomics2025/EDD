@@ -13,9 +13,14 @@ URL = os.environ.get("SUPABASE_URL")
 KEY = os.environ.get("SUPABASE_KEY")
 
 if not URL or not KEY:
-    raise Exception("❌ Faltan las credenciales de Supabase en el entorno.")
+    raise ValueError("❌ ERROR CRÍTICO: Faltan las credenciales de Supabase en el entorno.")
 
 supabase: Client = create_client(URL, KEY)
+
+# --- CABECERAS GLOBALES ---
+DEFAULT_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
 
 def parsear_mes_anio(texto):
     # Transforma "Enero/2026" en "2026-01-01"
@@ -25,75 +30,80 @@ def parsear_mes_anio(texto):
         "Septiembre":"09", "Octubre":"10", "Noviembre":"11", "Diciembre":"12"
     }
     try:
+        if '/' not in texto:
+            return None
         mes, anio = texto.split('/')
         mes_num = meses.get(mes.strip().capitalize(), "01")
         return f"{anio.strip()}-{mes_num}-01"
-    except:
+    except Exception:
         return None
 
 def run():
-    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 👷 Iniciando Robot de Salarios (RIPTE)...")
+    # Fijamos explícitamente la zona horaria de Argentina (UTC-3)
+    tz_ar = datetime.timezone(datetime.timedelta(hours=-3))
+    hora_actual = datetime.datetime.now(tz_ar)
+    
+    print(f"[{hora_actual.strftime('%H:%M:%S')}] 👷 Iniciando Robot de Salarios (RIPTE)...")
     
     try:
-        print("   📥 Extrayendo datos directo del Ministerio de Trabajo...")
+        print("   📥 Extrayendo datos directo del Ministerio de Trabajo/Capital Humano...")
         url_oficial = "https://www.argentina.gob.ar/trabajo/seguridadsocial/ripte"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         
-        r = requests.get(url_oficial, headers=headers, verify=False, timeout=20)
+        r = requests.get(url_oficial, headers=DEFAULT_HEADERS, verify=False, timeout=20)
+        r.raise_for_status()
         
-        if r.status_code == 200:
-            soup = BeautifulSoup(r.text, 'html.parser')
-            table = soup.find('table') # Buscamos la tabla principal
-            
-            if not table:
-                print("   ❌ No se encontró la tabla en la página oficial.")
-                return
+        soup = BeautifulSoup(r.text, 'html.parser')
+        table = soup.find('table') # Buscamos la tabla principal
+        
+        if not table or not table.find('tbody'):
+            print("   ❌ No se encontró la tabla o el cuerpo de la misma. El gobierno pudo haber modificado el HTML.")
+            return
 
-            paquete_final = []
-            
-            # Recorremos cada fila de la tabla
-            for row in table.find('tbody').find_all('tr'):
-                cols = row.find_all('td')
-                if len(cols) >= 3:
-                    mes_raw = cols[0].text.strip()
+        paquete_final = []
+        
+        # Recorremos cada fila de la tabla
+        for row in table.find('tbody').find_all('tr'):
+            cols = row.find_all('td')
+            if len(cols) >= 3:
+                mes_raw = cols[0].text.strip()
+                
+                if '/' in mes_raw:
+                    var_raw = cols[2].text.strip().replace('%', '').replace(',', '.').strip()
+                    fecha_formateada = parsear_mes_anio(mes_raw)
                     
-                    if '/' in mes_raw:
-                        var_raw = cols[2].text.strip().replace('%', '').replace(',', '.').strip()
-                        fecha_formateada = parsear_mes_anio(mes_raw)
-                        
-                        if fecha_formateada:
-                            try:
-                                paquete_final.append({
-                                    "fecha": fecha_formateada,
-                                    "var_ripte_mensual": float(var_raw) if var_raw else 0.0
-                                })
-                            except ValueError:
-                                pass
+                    if fecha_formateada:
+                        try:
+                            paquete_final.append({
+                                "fecha": fecha_formateada,
+                                "var_ripte_mensual": float(var_raw) if var_raw else 0.0
+                            })
+                        except ValueError:
+                            pass
 
-            if paquete_final:
-                # La web los pone de más nuevo a más viejo. Los damos vuelta.
-                paquete_final = sorted(paquete_final, key=lambda x: x["fecha"])
-                paquete_reciente = paquete_final[-36:] # Últimos 3 años
-                
-                print("   💾 Guardando en base de datos (tabla: datos_salarios)...")
-                
-                # 1. Extraemos las fechas que vamos a subir
-                fechas_a_actualizar = [dato["fecha"] for dato in paquete_reciente]
-                
-                # 2. Borramos esos meses específicos para no crear duplicados
-                supabase.table('datos_salarios').delete().in_('fecha', fechas_a_actualizar).execute()
-                
-                # 3. Insertamos la data fresca
-                supabase.table('datos_salarios').insert(paquete_reciente).execute()
-                
-                print(f"✅ ¡Robot completado! Se actualizaron {len(paquete_reciente)} meses de la fuente oficial.")
-                ultimo_dato = paquete_reciente[-1]
-                print(f"   🌟 Último dato cargado: {ultimo_dato['fecha']} -> Variación: {ultimo_dato['var_ripte_mensual']}%")
-            else:
-                print("   ⚠️ No se pudieron extraer datos válidos de la tabla.")
-        else:
-            print(f"   ⚠️ Error de conexión a la web oficial: HTTP {r.status_code}")
+        if paquete_final:
+            # La web los pone de más nuevo a más viejo. Los damos vuelta.
+            paquete_final = sorted(paquete_final, key=lambda x: x["fecha"])
+            paquete_reciente = paquete_final[-36:] # Últimos 3 años
             
+            print("   💾 Guardando en base de datos (tabla: datos_salarios)...")
+            
+            # 1. Extraemos las fechas que vamos a subir
+            fechas_a_actualizar = [dato["fecha"] for dato in paquete_reciente]
+            
+            # 2. Borramos esos meses específicos para no crear duplicados
+            supabase.table('datos_salarios').delete().in_('fecha', fechas_a_actualizar).execute()
+            
+            # 3. Insertamos la data fresca
+            supabase.table('datos_salarios').insert(paquete_reciente).execute()
+            
+            print(f"✅ ¡Robot completado! Se actualizaron {len(paquete_reciente)} meses de la fuente oficial.")
+            ultimo_dato = paquete_reciente[-1]
+            print(f"   🌟 Último dato cargado: {ultimo_dato['fecha']} -> Variación: {ultimo_dato['var_ripte_mensual']}%")
+        else:
+            print("   ⚠️ No se pudieron extraer datos válidos de la tabla.")
+            
+    except requests.exceptions.RequestException as e:
+        print(f"   ⚠️ Error de red o HTTP conectando al Ministerio: {e}")
     except Exception as e:
         print(f"   ❌ Error crítico en el bot de Salarios: {e}")
 
