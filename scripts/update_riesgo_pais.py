@@ -1,43 +1,64 @@
 import os
+import datetime
 import requests
 from supabase import create_client, Client
 
-# 1. Conexión a Supabase
-url: str = os.environ.get("SUPABASE_URL")
-key: str = os.environ.get("SUPABASE_KEY")
+# --- CREDENCIALES ---
+URL = os.environ.get("SUPABASE_URL")
+KEY = os.environ.get("SUPABASE_KEY")
 
-if not url or not key:
-    print("❌ Error: Credenciales de Supabase no encontradas.")
-    exit(1)
+if not URL or not KEY:
+    raise ValueError("❌ ERROR CRÍTICO: Credenciales de Supabase no encontradas en Secrets.")
 
-supabase: Client = create_client(url, key)
+supabase: Client = create_client(URL, KEY)
 
-# 2. Consultar la API pública de ArgentinaDatos
-API_URL = "https://api.argentinadatos.com/v1/finanzas/indices/riesgo-pais"
+# --- CABECERAS ---
+DEFAULT_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+}
 
-try:
-    print("⏳ Buscando datos de Riesgo País...")
-    response = requests.get(API_URL)
-    response.raise_for_status()
-    data = response.json()
+def run():
+    # Fijamos la zona horaria para los logs
+    tz_ar = datetime.timezone(datetime.timedelta(hours=-3))
+    hora_actual = datetime.datetime.now(tz_ar)
     
-    # Agarramos solo los últimos 5 días
-    ultimos_dias = data[-5:] 
+    print(f"[{hora_actual.strftime('%H:%M:%S')}] 📈 Iniciando Robot de Riesgo País...")
 
-    for dia in ultimos_dias:
-        fecha = dia['fecha']
-        valor = dia['valor']
-        
-        # 3. Upsert: Le agregamos on_conflict='fecha' para que sepa qué hacer con los repetidos
-        supabase.table('historial_riesgo_pais').upsert(
-            {"fecha": fecha, "valor": valor},
-            on_conflict="fecha"
-        ).execute()
-        
-        print(f"✅ Guardado/Actualizado: {fecha} -> {valor} pts")
-        
-    print("🚀 Proceso finalizado con éxito.")
+    API_URL = "https://api.argentinadatos.com/v1/finanzas/indices/riesgo-pais"
 
-except Exception as e:
-    print(f"❌ Error durante la actualización: {e}")
-    exit(1)
+    try:
+        print("   ⏳ Buscando datos en la API...")
+        response = requests.get(API_URL, headers=DEFAULT_HEADERS, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Agarramos solo los últimos 5 días
+        ultimos_dias = data[-5:] 
+        paquete_guardar = []
+
+        for dia in ultimos_dias:
+            fecha = dia.get('fecha')
+            valor = dia.get('valor')
+            
+            if fecha and valor is not None:
+                paquete_guardar.append({"fecha": fecha, "valor": valor})
+                print(f"   ✅ Leído: {fecha} -> {valor} pts")
+        
+        # Upsert en bloque (Un solo viaje a la base de datos)
+        if paquete_guardar:
+            print("   💾 Guardando en Supabase...")
+            supabase.table('historial_riesgo_pais').upsert(
+                paquete_guardar,
+                on_conflict="fecha"
+            ).execute()
+            print(f"🚀 Proceso finalizado con éxito. Se actualizaron {len(paquete_guardar)} días.")
+        else:
+            print("   ⚠️ No se encontraron datos para guardar.")
+
+    except requests.exceptions.RequestException as e:
+        print(f"   ⚠️ Error de red consultando la API: {e}")
+    except Exception as e:
+        print(f"   ❌ Error general durante la actualización: {e}")
+
+if __name__ == "__main__":
+    run()
