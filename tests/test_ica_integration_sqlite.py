@@ -48,6 +48,7 @@ class SQLiteAdapter:
 
 class Integration(unittest.TestCase):
  def setUp(self):
+  gate=patch.object(common,'ensure_writes_verified');gate.start();self.addCleanup(gate.stop)
   self.net=patch('socket.socket.connect',side_effect=AssertionError('No network'));self.net.start();self.addCleanup(self.net.stop)
  def test_repeat_and_preserve(self):
   for spec in TABLES:

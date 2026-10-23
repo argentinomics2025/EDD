@@ -12,7 +12,7 @@ import re
 import sys
 import unicodedata
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request, HTTPRedirectHandler, build_opener
 
 MONTHS = ('enero febrero marzo abril mayo junio julio agosto septiembre octubre noviembre diciembre').split()
 MAX_RECORDS = 5000
@@ -84,18 +84,38 @@ def number(value, *, localized=False):
     return float(result)
 
 
-def download(url, host):
+def authorized_url(url, host):
     parsed = urlparse(url)
-    if parsed.scheme != 'https' or parsed.hostname != host or parsed.username or parsed.password:
-        raise ValueError('La fuente debe ser HTTPS en el dominio oficial permitido')
-    with urlopen(Request(url, headers={'User-Agent': 'EconomiaCriolla-ICA/1.0'}), timeout=30) as response:
-        final = urlparse(response.url)
-        if final.scheme != 'https' or final.hostname != host:
-            raise ValueError('Redirección fuera de la fuente oficial')
+    if (parsed.scheme != 'https' or parsed.hostname != host
+            or parsed.username or parsed.password or parsed.port not in (None, 443)):
+        raise ValueError('Destino no autorizado: requiere HTTPS en el host oficial y puerto 443')
+
+
+class OfficialRedirectHandler(HTTPRedirectHandler):
+    def __init__(self, host):
+        self.host = host
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # urllib calls this BEFORE opening the next connection, on every hop.
+        authorized_url(newurl, self.host)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def download(url, host):
+    authorized_url(url, host)
+    opener = build_opener(OfficialRedirectHandler(host))
+    with opener.open(Request(url, headers={'User-Agent': 'EconomiaCriolla-ICA/1.0'}), timeout=30) as response:
+        authorized_url(response.url, host)  # defense in depth, not the redirect gate
         content = response.read(30_000_001)
     if not content or len(content) > 30_000_000:
         raise ValueError('Archivo vacío o demasiado grande')
     return content
+
+
+def ensure_writes_verified():
+    # Deliberate hard lock: no environment variable or CLI flag can unlock it.
+    # Remove only in a separately reviewed change after schema and integration proof.
+    raise RuntimeError('NO APTO PARA PRODUCCIÓN: restricciones y PostgREST no verificados; escrituras bloqueadas')
 
 
 def read_workbook(content):
@@ -141,6 +161,7 @@ def validate_records(records, keys):
 
 def persist(client, table, records, keys):
     validate_records(records, keys)
+    ensure_writes_verified()
     # Exactly one PostgREST statement per robot: no DELETE, no partial batches.
     # Missing UNIQUE constraints cause an error rather than a destructive fallback.
     client.table(table).upsert(records, on_conflict=','.join(keys), ignore_duplicates=True).execute()
@@ -155,6 +176,7 @@ def publish(table, records, keys, write=False, client=None, *, reviewed_sha256=N
         return
     if not reviewed_sha256 or not hmac.compare_digest(digest, reviewed_sha256):
         raise ValueError('Se requiere el SHA256 exacto del payload revisado; no se escribió nada')
+    ensure_writes_verified()
     if client is None:
         url, key = os.environ.get('SUPABASE_URL'), os.environ.get('SUPABASE_KEY')
         if not url or not key:

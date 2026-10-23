@@ -10,6 +10,9 @@ from scripts import ica_common as common, bot_ica as countries, bot_ica_rubros a
 
 class SafetyTests(unittest.TestCase):
     def setUp(self):
+        gate = patch.object(common, 'ensure_writes_verified')
+        gate.start()
+        self.addCleanup(gate.stop)
         self.network = patch('socket.socket.connect', side_effect=AssertionError('Network forbidden'))
         self.network.start()
         self.addCleanup(self.network.stop)

@@ -1,148 +1,124 @@
-# Robots ICA: seguridad y validación local (etapa 3)
+# ICA — revisión del Draft PR #1
 
-Parche local para revisión. No listo para producción. No se conectó a Supabase,
-no se descargaron fuentes oficiales ni se aplicaron migraciones. No se crearon
-commits, ramas o PR. Las pruebas usan fixtures sintéticas y SQLite descartable.
+**NO APTO PARA PRODUCCIÓN. No integrar ni desplegar.**
+No se descargaron archivos oficiales, ejecutaron migraciones ni contactó
+Supabase. Solo se modificó `fix/ica-safe-ingestion` para revisión.
 
-## Fallos corregidos
+## Bloqueo efectivo de todas las escrituras
 
-1. Todos los workflows permiten escritura solo con `workflow_dispatch`,
-   `write=true` y un SHA256 revisado. El cron de COMEX continúa exclusivamente
-   en simulación. Las pruebas verifican el gate y ejecutan su shell con un
-   Python ficticio; no lanzan robots ni GitHub Actions reales.
-2. Rubros rechaza un subtotal individual que supera su padre más 1 millón USD.
-   La tolerancia absoluta corresponde al máximo error de dos cifras redondeadas
-   a la unidad de millón (0.5 + 0.5), sin porcentajes que oculten errores grandes.
-   Se confirma la unidad del encabezado, se rechazan unidades mixtas y no se
-   convierte por magnitud. Esta cota de precisión requiere confirmación con los
-   Excel oficiales. No equivale a aceptar unidades distintas o escalar montos.
-   No se suman hijos por defecto: pueden superponerse o no agotar el total.
-   Solo una especificación de fuente revisada puede activar `disjoint` y
-   `exhaustive`; para n hijos se tolera (n+1)/2 millones de redondeo independiente.
-   Esos modos tienen tests pero aún no se habilitan en los parsers oficiales.
-3. ICA rechaza países con importes faltantes, incluso cuando faltan ambos flujos.
-   Un cero numérico o textual explícito sí se conserva. Nunca se infiere cero.
+`ensure_writes_verified()` falla incondicionalmente, tanto desde `publish()`
+como desde `persist()`, antes de usar un cliente. No hay variable de entorno,
+flag, SHA256 o cliente inyectado que desbloquee la implementación real.
+Solo otro cambio revisado podrá retirar ese bloqueo después de verificar
+restricciones e integración PostgreSQL/PostgREST/SDK. Los cron siguen en dry-run.
 
-La detección de hojas/columnas sigue siendo conservadora: puede rechazar un
-informe válido con otra disposición; no se conoce aún su compatibilidad real.
+`--write` y el SHA256 exacto siguen siendo condiciones necesarias, **pero no
+suficientes**: aun con ambos, escribir está bloqueado. El SHA256 vincula tabla,
+claves y payload completo; no es autenticación de usuario ni firma de aprobación.
+No se añaden flags de desbloqueo ni se modifican secretos.
 
-## Responsabilidad y política de persistencia
+El contrato futuro conserva `upsert(..., ignore_duplicates=True)`: una sola
+solicitud de hasta 5000 filas, solo inserciones de claves nuevas, sin DELETE ni
+actualizaciones históricas. Esto requiere UNIQUE reales compatibles con
+`on_conflict`, NOT NULL, guardas de identidad normalizada y validación de RLS,
+triggers, defaults y roles. No asumir que esas condiciones existen.
+No hay atomicidad entre robots ni coordinación con escritores externos.
 
-- `bot_comex.py`: solo `datos_comex`, sin históricos manuales.
-- `bot_ica.py`: solo `socios_comerciales`.
-- `bot_ica_rubros.py`: solo `comex_rubros`, sin borrar totales o países.
+## Países: rankings independientes y bloqueo de interpretación
 
-Una sola solicitud por ejecución, hasta 5000 filas, sin DELETE ni lotes parciales.
-Se usa `upsert(..., ignore_duplicates=True)`: **solo inserta claves nuevas**.
-Una fila existente, incluidas sus columnas no enviadas, permanece sin cambios,
-incluso si el payload propone otra cifra. No hay opción para actualizar
-históricos en este parche. Un HTTP exitoso no significa que todas las filas
-se hayan insertado; el log confirma la solicitud, no inventa cantidades.
-Las cifras manuales existentes tampoco se corrigen automáticamente.
+`parse_countries()` ya no exige los mismos países en ambos rankings. Produce
+la unión de observaciones para inspección en simulación:
 
-La protección de conflictos requiere las claves reales y las guardas de
-identidad normalizada de la propuesta de esquema. Las pruebas de SQLite no
-certifican el SQL que genera PostgREST ni RLS/defaults/triggers de producción.
-No hay atomicidad entre los tres robots ni control sobre otros escritores.
+- País observado solo en exportaciones: incluye únicamente ese importe.
+- País observado solo en importaciones: incluye únicamente ese importe.
+- Ambos flujos observados: incluye los dos importes y su saldo.
+- Un flujo ausente del ranking no se transforma en cero ni en SQL NULL.
+- Un país identificado sin importe falla; un cero explícito se conserva.
+- Un importe sin nombre de país falla; una posición completamente vacía no
+  constituye una observación. Se conservan los controles de duplicados.
 
-## Simulación, revisión y autorización explícita
+Las filas parciales **no son un contrato de persistencia**. La publicación
+asimétrica falla antes del publicador, además del bloqueo global de escrituras.
+Sin los Excel y su metodología no se decide si los rankings son exhaustivos,
+si hay otros cuadros con las contrapartidas, o cómo mostrar los faltantes en
+el frontend. Tampoco se decide que no aparecer implique comercio nulo.
+Se requiere resolver esa semántica y el esquema de destino en revisión futura.
+Los filtros de agregados/notas y columnas asumidas aún requieren fixtures reales.
 
-Preparación en un entorno local aislado, Python 3.10+:
+## Descargas: validar antes de cada redirección
+
+Se usa un opener dedicado con `OfficialRedirectHandler`. Antes de seguir cada
+salto, exige HTTPS, host oficial exacto, ausencia de userinfo y puerto 443
+implícito o explícito. Rechaza otros dominios, downgrade HTTP y puertos alternativos
+antes de que urllib abra el destino. También valida URL inicial y final.
+No cambia globalmente urllib ni deshabilita certificados/TLS.
+
+Los tests utilizan un transporte HTTP simulado dentro de urllib: una respuesta
+301/302/303/307/308 a otro dominio no genera una segunda solicitud. También
+prueban downgrade, userinfo, puerto y una redirección relativa legítima.
+No contactan servidores reales.
+
+## Salvaguardas anteriores conservadas
+
+- COMEX solo `datos_comex`; ICA solo `socios_comerciales`; Rubros solo
+  `comex_rubros`. Sin datos históricos manuales nuevos ni borrados previos.
+- Rubros valida unidades y cada hijo contra su padre. La tolerancia de 1 millón
+  USD representa el error máximo de dos cifras redondeadas a la unidad (0.5+0.5);
+  debe contrastarse con precisión real del documento. No hay escala por magnitud.
+- No se suman hijos por defecto: podrían solaparse o no agotar el total. Los
+  controles `disjoint`/`exhaustive` solo sirven con estructura de fuente revisada;
+  su tolerancia de suma es (n+1)/2 millones. No se habilitan automáticamente.
+- Importes faltantes e inválidos no se convierten en cero. Claves duplicadas se
+  comparan por espacios, mayúsculas, diacríticos y aliases explícitos limitados.
+- No se corrigen ni renombran registros almacenados. Hace falta revisar
+  duplicados y nulos antes de cualquier migración. Véase
+  [propuesta no ejecutada](ica-schema-proposal.md).
+- Errores generan salida no cero, sin mensajes de éxito ni credenciales.
+
+## Pruebas locales y alcance
 
 ```sh
-python -m pip install -r requirements-ica.txt
 PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -v
 ```
 
-La instalación no se repitió en esta etapa: se usaron pandas 2.2.3 y xlrd 2.0.1
-ya disponibles; supabase no está instalado localmente. Los tests no lo necesitan.
-La línea pip es una instrucción futura y requiere acceso autorizado al registro.
-Las dependencias directas están fijadas; las transitivas aún no tienen lock.
+Se usaron Python 3.12, pandas 2.2.3 y xlrd 2.0.1 ya instalados, sin instalar
+paquetes ni descargar imágenes. No está instalado el SDK Supabase.
 
-Por defecto no se crea cliente de Supabase, aunque haya credenciales presentes.
-La simulación informa tabla, filas, payload completo y SHA256 determinista. Ese
-hash vincula tabla, claves y todos los datos; no es una firma de identidad ni un
-reemplazo del control de permisos del repositorio. Se ordena por clave para que
-el orden de las filas no cambie el hash. No contiene secretos.
+Resultado de la revisión: **60 pruebas aprobadas, 0 fallidas**, incluidas
+regresiones de rankings asimétricos, redirecciones antes de contacto y bloqueo
+real de `publish`/`persist` con SHA256 correcto. Sintaxis Python, cuatro YAML,
+Bash y `git diff --check` correctos.
 
-Después de obtener autorización para contactar la fuente, los comandos son:
+Los tests que examinan el contrato futuro de persistencia sustituyen
+explícitamente `ensure_writes_verified` con un mock. No prueban que la aplicación
+actual pueda escribir: los tests nuevos prueban sin ese mock que no puede.
+Siete tests usan SQLite `:memory:` con un adaptador SQL: preservación de columnas,
+períodos e históricos, repetición, falta de UNIQUE, rollback de una sentencia y
+reintento tras timeout. No equivalen a PostgreSQL, PostgREST ni SDK real.
 
-```sh
-python scripts/bot_comex.py
-python scripts/bot_ica.py --period YYYY-MM --excel-url URL_OFICIAL_XLS
-python scripts/bot_ica_rubros.py --period YYYY-MM --excel-url URL_OFICIAL_XLS
-```
+Las conexiones de red reales están bloqueadas dentro de los tests. Los gates
+Bash se prueban con un Python ficticio, sin robots ni credenciales reales.
+Python 3.10 y GitHub Actions no se presentan como ejecutados localmente.
 
-Esos comandos sí descargan la fuente; no se ejecutaron durante esta tarea.
-Revisar el payload antes de una eventual escritura, que exige `--write` y
-`--reviewed-sha256 HASH_REVISADO`, además de credenciales configuradas por el
-canal seguro. Si el contenido cambia entre simulación y ejecución, falla antes
-de crear el cliente. En Actions el input `reviewed_sha256` es obligatorio al
-escribir. Ni este documento ni los tests autorizan escrituras reales.
-El modo write solo se prueba con mocks/adaptadores y credenciales ficticias.
+## Bloqueos críticos/altos pendientes y siguiente validación
 
-La URL y el mes del Excel son parámetros; la detección automática de la última
-publicación sigue pendiente. No se adivinan fechas de publicación.
+1. Obtener, con autorización, fixtures oficiales locales: al menos
+   `ica_cuadros_19_02_26.xls`, `ica_cuadros_19_03_26.xls` y CSV COMEX con metadatos.
+   Confirmar encabezados, unidades, precisión, columnas y semántica de rankings.
+   No disponibles ni descargados durante esta revisión.
+2. Disponer de esquema autorizado sin secretos y una base PostgreSQL/PostgREST
+   descartable con SDK real. Probar UNIQUE/NOT NULL y guardas normalizadas,
+   RLS/defaults/triggers/FK, idempotencia, conservación, rollback, concurrencia y
+   respuestas perdidas. Comparar snapshots completos. No ejecutado.
+3. Revisar duplicados/nulos y aliases históricos, preservar originales y definir
+   correcciones con evidencia. No ejecutar la propuesta de migración sin otra
+   autorización. Índices literales no bastan para duplicados lógicos.
+4. Resolver representación de observaciones parciales y contrato del consumidor.
+   El frontend local usa balanza mock/estática y no valida al consumidor desplegado.
+5. Solo tras esa evidencia, revisar un cambio separado de desbloqueo. Las
+   correcciones históricas requerirán una RPC transaccional auditada diferente.
 
-## Identidades y esquema
-
-Se rechazan claves duplicadas normalizando mayúsculas, espacios y diacríticos.
-En países se usan aliases explícitos (por ejemplo Viet Nam/Vietnam); no se usa
-fuzzy matching. Entre ejecuciones, los países conocidos tienen presentación
-canónica. El catálogo es limitado y requiere revisión de cambios de nombre.
-No se renombraron ni fusionaron filas almacenadas.
-
-[Propuesta de migración no ejecutada](ica-schema-proposal.md): inventario,
-preflight de nulos/blancos/duplicados literales y normalizados, resolución
-revisada preservando originales, UNIQUE/NOT NULL y guardas normalizadas.
-Los índices exactos por sí solos no impiden duplicados lógicos de datos viejos.
-No habilitar escrituras antes de validar esas condiciones en una base aislada.
-
-## Pruebas y límites de la evidencia
-
-Las 3 regresiones que fallaban en etapa 2 están incorporadas al repositorio.
-La suite cubre errores de red, Excel truncado, CSV incompleto, fallos de
-escritura, ceros/faltantes, identidades y aliases, hash revisado y bloqueo de
-sobrescrituras, tolerancias y estructuras parciales/disjuntas/exhaustivas.
-
-El adaptador SQL usa SQLite `:memory:`. Para las tres claves verifica repetición,
-conservación de valores y columnas, otros períodos, falta de UNIQUE, rollback
-ante una segunda fila inválida y reintento tras timeout posterior al commit.
-No utiliza el SDK Supabase ni demuestra comportamiento real de PostgREST.
-Los tests de red bloquean conexiones reales y los workflows no reciben secretos
-en su paso de pruebas. Los comandos shell se ejecutan con un stub de Python.
-
-No hay archivos oficiales disponibles localmente. Faltan al menos:
-`ica_cuadros_19_02_26.xls` (enero 2026), `ica_cuadros_19_03_26.xls` (febrero 2026),
-y una muestra oficial del CSV de COMEX con sus metadatos de unidades/precisión.
-No se descargaron archivos para suplirlos. También falta PostgreSQL/PostgREST y
-el SDK real; no se descargaron imágenes de contenedor ni paquetes externos.
-
-## Antes de integrar para producción
-
-- Validar fixtures oficiales mensuales, revisadas y acumuladas: encabezados,
-  período estadístico, columnas, precisión, unidades y estructura de subtotales.
-- Probar PostgreSQL/PostgREST/SDK con schema aislado, constraints, RLS, defaults,
-  triggers, concurrencia y respuestas perdidas; comparar snapshots completos.
-- Resolver duplicados/nulos y aprobar por separado las migraciones necesarias.
-- Definir correcciones históricas mediante un mecanismo transaccional y auditado;
-  mantenerlas bloqueadas mientras tanto.
-- La descarga todavía sigue redirecciones antes de validar el dominio final;
-  falta endurecer ese control antes de habilitar acceso a fuentes reales.
-- El frontend local usa balanza estática/mock. No sirve para certificar un
-  consumidor desplegado de Supabase; validar ese contrato por separado.
-
-Apto para revisión local del parche y, si se autoriza, un PR de revisión con
-estos bloqueos explícitos. No es una autorización para integrar, migrar o desplegar.
-
-## Resultado de esta etapa
-
-- Suite Python local: **47 aprobadas, 0 fallidas**, incluyendo las 3 regresiones
-  y 7 tests con adaptador SQLite (los de datos recorren las tres tablas).
-- Sintaxis Python, cuatro YAML, shell Bash y `git diff --check`: correctos.
-- Frontend sin cambios: build offline de Vite aprobado en el mirror local
-  `/workspace/edd-runtime`; ESLint sigue fallando con 2 errores y 7 advertencias
-  preexistentes (`historicalData` sin uso y `__dirname` no definido).
-- No ejecutados: fixtures oficiales, SDK real y PostgreSQL/PostgREST; no se
-  presenta su ausencia como una prueba aprobada. Solo se ejecutó Python 3.12;
-  el workflow propone 3.10/3.12, aún no ejecutado en GitHub.
+Pendientes adicionales: resolver automático de publicaciones y lock completo de
+dependencias transitivas. El build de frontend pasó en la etapa anterior;
+ESLint tenía 2 errores y 7 advertencias preexistentes, fuera de este parche.
+La evidencia de CI remoto se informará según acceso real, sin inferir su éxito.

@@ -12,6 +12,9 @@ from scripts import bot_ica_rubros as rubros
 
 class ICATests(unittest.TestCase):
     def setUp(self):
+        gate = patch.object(common, 'ensure_writes_verified')
+        gate.start()
+        self.addCleanup(gate.stop)
         self.network = patch('socket.socket.connect', side_effect=AssertionError('Network forbidden'))
         self.network.start()
         self.addCleanup(self.network.stop)
@@ -232,7 +235,8 @@ class ICATests(unittest.TestCase):
         self.assertEqual(write.call_args.args[0], 'datos_comex')
 
     def test_download_errors_propagate(self):
-        with patch.object(common, 'urlopen', side_effect=TimeoutError):
+        with patch.object(common, 'build_opener') as factory:
+            factory.return_value.open.side_effect = TimeoutError
             with self.assertRaises(TimeoutError):
                 common.download('https://www.indec.gob.ar/data.xls', 'www.indec.gob.ar')
         for url in ['http://www.indec.gob.ar/a', 'https://example.org/a']:

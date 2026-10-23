@@ -47,6 +47,8 @@ def parse_countries(df, selected_period):
         for _, row in df.iloc[5:].iterrows():
             name = country_name(row[name_col])
             if not name:
+                if pd.isna(row[name_col]) and not pd.isna(row[value_col]):
+                    raise ValueError('Importe sin país identificado')
                 continue
             if pd.isna(row[value_col]):
                 raise ValueError('Importe faltante para un país; cero debe ser explícito')
@@ -59,14 +61,22 @@ def parse_countries(df, selected_period):
             values[key] = (name, amount)
         sides.append(values)
     exports, imports = sides
-    # Never infer a zero for a country absent from the opposite ranking.
-    if not exports or exports.keys() != imports.keys():
-        raise ValueError('Cobertura de países incompleta: faltan contrapartidas')
+    if not exports or not imports:
+        raise ValueError('Ranking vacío o archivo incompleto')
     _, label = period(selected_period)
-    return [{'pais': exports[k][0], 'fecha_informe': label,
-             'exportaciones': exports[k][1], 'importaciones': imports[k][1],
-             'saldo_comercial': round(exports[k][1] - imports[k][1], 2)}
-            for k in sorted(exports)]
+    records = []
+    for key in sorted(exports.keys() | imports.keys()):
+        row = {'pais': (exports.get(key) or imports[key])[0], 'fecha_informe': label}
+        if key in exports:
+            row['exportaciones'] = exports[key][1]
+        if key in imports:
+            row['importaciones'] = imports[key][1]
+        if key in exports and key in imports:
+            row['saldo_comercial'] = round(exports[key][1] - imports[key][1], 2)
+        records.append(row)
+    # Partial rows are observations for dry-run only, NOT a database contract.
+    # Missing keys mean unobserved in this ranking, never a zero or an SQL NULL.
+    return records
 
 
 def main(argv=None):
@@ -78,6 +88,8 @@ def main(argv=None):
         records = parse_countries(pd.read_excel(workbook, sheet, header=None), args.period)
     finally:
         workbook.close()
+    if args.write and any('saldo_comercial' not in row for row in records):
+        raise ValueError('Cobertura asimétrica: publicación bloqueada hasta validar Excel y contrato de datos')
     publish('socios_comerciales', records, ('fecha_informe', 'pais'), args.write,
             reviewed_sha256=args.reviewed_sha256)
 
