@@ -4,7 +4,8 @@ from io import BytesIO, StringIO
 import contextlib
 import unittest
 from unittest.mock import Mock, MagicMock, patch
-from urllib.request import BaseHandler, Request, build_opener
+from urllib.request import BaseHandler, HTTPRedirectHandler, Request, build_opener
+from urllib.error import HTTPError
 from urllib.response import addinfourl
 import pandas as pd
 from scripts import ica_common as common, bot_ica as countries
@@ -80,17 +81,45 @@ class ReviewTests(unittest.TestCase):
         opener = build_opener(common.OfficialRedirectHandler('www.indec.gob.ar'), transport)
         return opener, transport
 
+    def assert_redirect_blocked(self, location, code):
+        opener, transport = self.redirect(location, code)
+        # Python 3.10 has neither http_error_308 nor 308 redirect_request support:
+        # it fails closed in urllib before our destination guard is invoked.
+        # 3.12 handles 308, so our guard rejects the destination with ValueError.
+        unsupported_308 = code == 308 and not hasattr(HTTPRedirectHandler, 'http_error_308')
+        expected = HTTPError if unsupported_308 else ValueError
+        with self.assertRaises(expected) as raised:
+            opener.open('https://www.indec.gob.ar/start')
+        if unsupported_308:
+            self.assertEqual(raised.exception.code, 308)
+            self.assertEqual(raised.exception.url, 'https://www.indec.gob.ar/start')
+            raised.exception.close()
+        # The security invariant is identical: no second request, even with 308.
+        self.assertEqual(transport.visited, ['https://www.indec.gob.ar/start'])
+
     def test_external_redirect_rejected_before_target_contact(self):
         for code in [301, 302, 303, 307, 308]:
-            opener, transport = self.redirect('https://evil.example/file.xls', code)
-            with self.subTest(status=code), self.assertRaises(ValueError):
-                opener.open('https://www.indec.gob.ar/start')
-            self.assertEqual(transport.visited, ['https://www.indec.gob.ar/start'])
+            with self.subTest(status=code):
+                self.assert_redirect_blocked('https://evil.example/file.xls', code)
 
     def test_http_downgrade_rejected_before_target_contact(self):
-        opener, transport = self.redirect('http://www.indec.gob.ar/file.xls')
-        with self.assertRaises(ValueError): opener.open('https://www.indec.gob.ar/start')
-        self.assertEqual(transport.visited, ['https://www.indec.gob.ar/start'])
+        for code in [301, 302, 303, 307, 308]:
+            with self.subTest(status=code):
+                self.assert_redirect_blocked('http://www.indec.gob.ar/file.xls', code)
+
+    def test_official_308_respects_native_runtime_support(self):
+        opener, transport = self.redirect('/file.xls', 308)
+        if hasattr(HTTPRedirectHandler, 'http_error_308'):
+            with opener.open('https://www.indec.gob.ar/start') as response:
+                self.assertEqual(response.read(), b'fixture')
+            self.assertEqual(transport.visited, ['https://www.indec.gob.ar/start',
+                                                'https://www.indec.gob.ar/file.xls'])
+        else:
+            with self.assertRaises(HTTPError) as raised:
+                opener.open('https://www.indec.gob.ar/start')
+            self.assertEqual(raised.exception.code, 308)
+            raised.exception.close()
+            self.assertEqual(transport.visited, ['https://www.indec.gob.ar/start'])
 
     def test_credentials_or_alternate_port_redirect_rejected(self):
         for url in ['https://user:pass@www.indec.gob.ar/file', 'https://www.indec.gob.ar:8443/file']:

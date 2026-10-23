@@ -84,7 +84,7 @@ PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -v
 Se usaron Python 3.12, pandas 2.2.3 y xlrd 2.0.1 ya instalados, sin instalar
 paquetes ni descargar imágenes. No está instalado el SDK Supabase.
 
-Resultado de la revisión: **60 pruebas aprobadas, 0 fallidas**, incluidas
+Resultado de la revisión: **61 pruebas aprobadas, 0 fallidas en Python 3.10.22 y 3.12.14**, incluidas
 regresiones de rankings asimétricos, redirecciones antes de contacto y bloqueo
 real de `publish`/`persist` con SHA256 correcto. Sintaxis Python, cuatro YAML,
 Bash y `git diff --check` correctos.
@@ -98,7 +98,8 @@ reintento tras timeout. No equivalen a PostgreSQL, PostgREST ni SDK real.
 
 Las conexiones de red reales están bloqueadas dentro de los tests. Los gates
 Bash se prueban con un Python ficticio, sin robots ni credenciales reales.
-Python 3.10 y GitHub Actions no se presentan como ejecutados localmente.
+Python 3.10.22 y 3.12.14 se ejecutaron localmente. GitHub Actions se informa
+por separado según evidencia remota, no por inferencia.
 
 ## Bloqueos críticos/altos pendientes y siguiente validación
 
@@ -122,3 +123,23 @@ Pendientes adicionales: resolver automático de publicaciones y lock completo de
 dependencias transitivas. El build de frontend pasó en la etapa anterior;
 ESLint tenía 2 errores y 7 advertencias preexistentes, fuera de este parche.
 La evidencia de CI remoto se informará según acceso real, sin inferir su éxito.
+
+## Compatibilidad CI de HTTP 308
+
+Se reprodujo el fallo del commit e449e00f en Python 3.10.22: 59/60 pruebas
+pasaban y la prueba de redirección externa recibía HTTPError(308). urllib de
+3.10 no implementa http_error_308 ni permite ese estado en redirect_request;
+rechaza la respuesta inicial antes de seguirla. Python 3.12.14 sí procesa 308
+y nuestra guarda rechaza el destino con ValueError antes del segundo contacto.
+
+Se corrigió la expectativa de la prueba, sin cambiar la implementación ni
+habilitar redirecciones nuevas. Solo se admite HTTPError para 308 cuando falta
+soporte nativo, comprobando código y URL inicial. En todos los casos se exige
+exactamente una solicitud. También se prueba downgrade HTTP para los cinco
+estados y el comportamiento del 308 oficial: funciona en 3.12 y falla cerrado
+en 3.10. Un origen oficial que responda 308 sigue siendo una limitación funcional
+explícita en Python 3.10; no es una autorización para seguir destinos prohibidos.
+
+Para validar ambas versiones se preparó un intérprete 3.10 y sus dependencias de
+pruebas fuera del checkout. No se descargaron documentos oficiales ni se usaron
+credenciales de Supabase. La descarga de runtimes/paquetes no ejecutó robots.
