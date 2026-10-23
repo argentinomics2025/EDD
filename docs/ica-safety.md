@@ -143,3 +143,10 @@ explícita en Python 3.10; no es una autorización para seguir destinos prohibid
 Para validar ambas versiones se preparó un intérprete 3.10 y sus dependencias de
 pruebas fuera del checkout. No se descargaron documentos oficiales ni se usaron
 credenciales de Supabase. La descarga de runtimes/paquetes no ejecutó robots.
+
+## EC-015: preparación de fixtures oficiales
+
+Inventario, contratos, matriz y procedimiento offline en
+[ec-015-official-fixtures.md](ec-015-official-fixtures.md). El runner local
+no descarga ni persiste y exige SHA256 de los bytes; sin referencia revisada
+retorna pendiente, no aprobado. No se validaron archivos oficiales.
