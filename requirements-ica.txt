@@ -1,0 +1,4 @@
+# Direct runtime dependencies; no browser/scraping packages needed by ICA.
+pandas==2.2.3
+xlrd==2.0.1
+supabase==2.15.0

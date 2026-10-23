@@ -1,149 +1,86 @@
-import os
-import pandas as pd
-import requests
+"""Publica exclusivamente socios comerciales; sin borrar países existentes."""
 import re
-from supabase import create_client, Client
-from io import BytesIO
+import pandas as pd
+try:
+    from .ica_common import (normalize, country_identity, number, period, validate_sheet, validate_value_column, download,
+                             read_workbook, excel_arguments, publish, cli)
+except ImportError:
+    from ica_common import (normalize, country_identity, number, period, validate_sheet, validate_value_column, download,
+                            read_workbook, excel_arguments, publish, cli)
 
-# ==========================================
-# ⚙️ PANEL DE CONTROL (Actualizar cada mes)
-# ==========================================
-MES_INFORME = "Enero 2026"
-EXCEL_URL = "https://www.indec.gob.ar/ftp/cuadros/economia/ica_cuadros_19_02_26.xls"
-# ==========================================
+EXCLUDED = {'total', 'resto', 'mercosur', 'union europea', 'asean', 'magreb',
+            'usmca', 'pais', 'paises', 's/d', 'moi', 'moa', 'pp', 'cye'}
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("⚠️ ERROR CRÍTICO: Faltan las credenciales de Supabase en las variables de entorno.")
+def country_name(value):
+    if pd.isna(value):
+        return None
+    name = re.split(r'\(|\*', str(value))[0].strip()
+    normalized = normalize(name)
+    if (normalized in EXCLUDED or normalized.startswith(('fuente:', 'nota:', 'notas:'))
+            or not 2 < len(name) < 60):
+        return None
+    return country_identity(name)
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- CABECERAS GLOBALES ---
-DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-}
+def detectar_pestana_totales(workbook):
+    candidates = []
+    for sheet in workbook.sheet_names:
+        df = pd.read_excel(workbook, sheet_name=sheet, nrows=15, header=None)
+        text = normalize(' '.join(str(v) for v in df.to_numpy().flat))
+        if 'principales paises' in text and 'segun exportaciones, importaciones, saldo e intercambio' in text:
+            candidates.append(sheet)
+    if len(candidates) != 1:
+        raise ValueError('No se identificó una única hoja de socios comerciales')
+    return candidates[0]
 
-def descargar_excel():
-    print(f"🔍 Descargando el Excel del INDEC para {MES_INFORME}...")
-    try:
-        response = requests.get(EXCEL_URL, headers=DEFAULT_HEADERS, timeout=30)
-        response.raise_for_status()
-        return BytesIO(response.content)
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"Error descargando el archivo del INDEC: {e}")
 
-# 🛡️ SUPER LIMPIADOR DE NÚMEROS
-def limpiar_numero(val):
-    if pd.isna(val):
-        return 0.0
-    if isinstance(val, (int, float)):
-        num = float(val)
-        if num > 100000:
-            num = num / 1000000.0
-        return round(num, 2)
-    if isinstance(val, str):
-        val = val.strip()
-        if val in ['-', 's/d', '', ' ']:
-            return 0.0
-        val = val.replace(' ', '').replace('\xa0', '')
-        val = val.replace('.', '').replace(',', '.')
-        val = re.sub(r'[^\d.-]', '', val)
-    try:
-        num = float(val)
-        if num > 100000:
-            num = num / 1000000.0
-        return round(num, 2)
-    except ValueError:
-        return 0.0
-
-def detectar_pestana_totales(xl_file):
-    print("🐕‍𦦙 Rastreando la pestaña de Totales por País...")
-    for sheet in xl_file.sheet_names:
-        df_temp = pd.read_excel(xl_file, sheet_name=sheet, nrows=15, header=None)
-        if df_temp.empty:
-            continue
-        texto_hoja = df_temp.astype(str).apply(lambda x: ' '.join(x), axis=1).str.lower().str.cat(sep=' ')
-        if "según exportaciones, importaciones, saldo e intercambio" in texto_hoja and "principales países" in texto_hoja:
-            print(f"   ✅ Pestaña correcta encontrada: {sheet}")
-            return sheet
-    return None
-
-def obtener_totales_ica(xl_file, sheet_name):
-    if not sheet_name:
-        return []
-        
-    print("📊 Extrayendo columnas de Expo e Impo (Modo Anti-Títulos)...")
-    # Usamos el objeto xl_file ya cargado en memoria, es más eficiente
-    df = pd.read_excel(xl_file, sheet_name=sheet_name, header=None, skiprows=5)
-    
+def parse_countries(df, selected_period):
+    validate_sheet(df, selected_period)
     if len(df.columns) < 6:
-        print("❌ Pestaña con formato incorrecto. No hay suficientes columnas.")
-        return []
-        
-    df_expo = df.iloc[:, [0, 1]].copy()
-    df_expo.columns = ['pais', 'exportaciones']
-    
-    df_impo = df.iloc[:, [4, 5]].copy()
-    df_impo.columns = ['pais', 'importaciones']
+        raise ValueError('Faltan columnas de socios')
+    for column in (1, 5):
+        validate_value_column(df, column, selected_period)
+    sides = []
+    for name_col, value_col in [(0, 1), (4, 5)]:
+        values = {}
+        for _, row in df.iloc[5:].iterrows():
+            name = country_name(row[name_col])
+            if not name:
+                continue
+            if pd.isna(row[value_col]):
+                raise ValueError('Importe faltante para un país; cero debe ser explícito')
+            key = normalize(name)
+            if key in values:
+                raise ValueError('País duplicado')
+            amount = number(row[value_col], localized=True)
+            if amount < 0:
+                raise ValueError('Flujo negativo')
+            values[key] = (name, amount)
+        sides.append(values)
+    exports, imports = sides
+    # Never infer a zero for a country absent from the opposite ranking.
+    if not exports or exports.keys() != imports.keys():
+        raise ValueError('Cobertura de países incompleta: faltan contrapartidas')
+    _, label = period(selected_period)
+    return [{'pais': exports[k][0], 'fecha_informe': label,
+             'exportaciones': exports[k][1], 'importaciones': imports[k][1],
+             'saldo_comercial': round(exports[k][1] - imports[k][1], 2)}
+            for k in sorted(exports)]
 
-    def limpiar_mitad(df_mitad, col_valor):
-        df_mitad = df_mitad.dropna(subset=['pais']).copy()
-        df_mitad['pais'] = df_mitad['pais'].astype(str)
-        
-        df_mitad['pais'] = df_mitad['pais'].apply(lambda x: x.split('(')[0].split('*')[0].split(',')[0].strip().title())
 
-        # Agregamos "Pais" y "País" a la basura para limpiar los títulos reales del Excel
-        basura = ["Total", "Fuente", "Notas", "Dato Estimado", "Resto", "Mercosur", "Unión Europea", "Asean", "Magreb", "Usmca", "S/D", "Pais", "País"]
-        for palabra in basura:
-            df_mitad = df_mitad[~df_mitad['pais'].str.contains(palabra, na=False, case=False)]
-
-        df_mitad = df_mitad[(df_mitad['pais'].str.len() > 2) & (df_mitad['pais'].str.len() < 30)]
-        df_mitad[col_valor] = df_mitad[col_valor].apply(limpiar_numero)
-        return df_mitad[df_mitad[col_valor] > 0]
-
-    df_expo_limpio = limpiar_mitad(df_expo, 'exportaciones')
-    df_impo_limpio = limpiar_mitad(df_impo, 'importaciones')
-
-    print("\n--- 🕵️ DEBUG EXPO (Lado Izquierdo) ---")
-    print(df_expo_limpio.head(5).to_string(index=False))
-    print("--------------------------------------\n")
-
-    print("\n--- 🕵️ DEBUG IMPO (Lado Derecho) ---")
-    print(df_impo_limpio.head(5).to_string(index=False))
-    print("--------------------------------------\n")
-
-    df_final = pd.merge(df_expo_limpio, df_impo_limpio, on='pais', how='outer').fillna(0)
-    df_final = df_final[~df_final['pais'].isin(["Moi", "Moa", "Pp", "Cye"])]
-    df_final['saldo_comercial'] = round(df_final['exportaciones'] - df_final['importaciones'], 2)
-    df_final['fecha_informe'] = MES_INFORME
-    
-    return df_final.to_dict(orient='records')
-
-def subir_totales_a_supabase(datos):
-    if not datos:
-        print("⚠️ No hay datos válidos para subir a Supabase.")
-        return
-        
-    print(f"\n🚀 Subiendo {len(datos)} PAÍSES a Supabase para {MES_INFORME}...")
+def main(argv=None):
+    args = excel_arguments(__doc__).parse_args(argv)
+    period(args.period)
+    workbook = read_workbook(download(args.excel_url, 'www.indec.gob.ar'))
     try:
-        supabase.table("socios_comerciales").delete().eq("fecha_informe", MES_INFORME).execute()
-        supabase.table("socios_comerciales").insert(datos).execute()
-        print("✅✅ ¡Sincronización completada! China DEBE estar en el recuadro de IMPO ahora. ✅✅")
-    except Exception as e:
-        print(f"❌ Error al guardar en Supabase: {e}")
+        sheet = detectar_pestana_totales(workbook)
+        records = parse_countries(pd.read_excel(workbook, sheet, header=None), args.period)
+    finally:
+        workbook.close()
+    publish('socios_comerciales', records, ('fecha_informe', 'pais'), args.write,
+            reviewed_sha256=args.reviewed_sha256)
 
-if __name__ == "__main__":
-    try:
-        archivo_bytes = descargar_excel()
-        
-        # Cargar el motor de Excel una sola vez ahorra memoria y evita problemas de puntero
-        xl_file = pd.ExcelFile(archivo_bytes, engine='xlrd')
-        
-        pestana_correcta = detectar_pestana_totales(xl_file)
-        totales = obtener_totales_ica(xl_file, pestana_correcta)
-        subir_totales_a_supabase(totales)
-        
-    except Exception as e:
-        print(f"❌ Error crítico general: {e}")
+
+if __name__ == '__main__':
+    raise SystemExit(cli(main))

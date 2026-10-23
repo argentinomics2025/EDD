@@ -1,156 +1,121 @@
-import os
+"""Publica solo rubros. Totales y países pertenecen a sus robots respectivos."""
 import pandas as pd
-import requests
-from supabase import create_client, Client
-from io import BytesIO
+try:
+    from .ica_common import (normalize, number, period, validate_sheet, validate_value_column, download,
+                             read_workbook, excel_arguments, publish, cli)
+except ImportError:
+    from ica_common import (normalize, number, period, validate_sheet, validate_value_column, download,
+                            read_workbook, excel_arguments, publish, cli)
 
-# ==============================================================================
-# ⚙️ CONFIGURACIÓN DEL MES (Actualizar a mano cada vez que sale el informe)
-# ==============================================================================
-MES_INFORME = "Febrero 2026"
-FECHA_DB = "2026-02-01" 
-EXCEL_URL = "https://www.indec.gob.ar/ftp/cuadros/economia/ica_cuadros_19_03_26.xls"
+EXPORTS = {'productos primarios': 'Productos primarios (PP)',
+           'manufacturas de origen agropecuario': 'Manufacturas de origen agropecuario (MOA)',
+           'manufacturas de origen industrial': 'Manufacturas de origen industrial (MOI)',
+           'combustibles y energia': 'Combustibles y energía (CyE)'}
+IMPORTS = {'bienes de capital': 'Bienes de capital (BK)',
+           'bienes intermedios': 'Bienes intermedios (BI)',
+           'combustibles y lubricantes': 'Combustibles y lubricantes (CyL)',
+           'piezas y accesorios para bienes de capital': 'Piezas y accesorios para bienes de capital (PyA)',
+           'bienes de consumo': 'Bienes de consumo (BC)',
+           'vehiculos automotores de pasajeros': 'Vehículos automotores de pasajeros (VA)'}
 
-HOJA_EXPO = "c12"
-HOJA_IMPO = "c14"
-HOJA_PAISES = "c21"
-# ==============================================================================
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+# Source values are in millions of USD. Allow at most one million difference
+# between independently rounded parent/child (0.5 + 0.5), never a percentage.
+# No sum of children is assumed: they may be overlapping or non-exhaustive.
+ROUNDING_UNIT = 1.0
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("❌ ERROR CRÍTICO: Faltan las credenciales de Supabase en Secrets.")
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+def validate_hierarchy(records, *, disjoint=False, exhaustive=False):
+    totals = {r['rubro_principal']: r['valor_usd'] for r in records if r['subrubro'] == 'TOTAL'}
+    children = {}
+    for row in records:
+        if row['subrubro'] == 'TOTAL':
+            continue
+        parent, value = row['rubro_principal'], row['valor_usd']
+        if parent not in totals or value > totals[parent] + ROUNDING_UNIT:
+            raise ValueError('Subrubro superior al total más tolerancia de redondeo')
+        children.setdefault(parent, []).append(value)
+    # Enable these checks only with a reviewed source partition specification.
+    if exhaustive and not disjoint:
+        raise ValueError('Una partición exhaustiva requiere estructura disjunta confirmada')
+    for parent, values in children.items():
+        tolerance = (len(values) + 1) * ROUNDING_UNIT / 2
+        delta = sum(values) - totals[parent]
+        if disjoint and delta > tolerance:
+            raise ValueError('Suma de subtotales disjuntos superior al total')
+        if exhaustive and abs(delta) > tolerance:
+            raise ValueError('Partición exhaustiva incoherente')
+    if exhaustive and set(children) != set(totals):
+        raise ValueError('Faltan subtotales de una partición exhaustiva')
 
-# --- CABECERAS GLOBALES ---
-DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-}
 
-def limpiar_numero(val):
-    if pd.isna(val): return 0.0
+def extraer_datos_rubros(df, flow, parents, selected_period):
+    validate_sheet(df, selected_period)
+    if len(df.columns) < 4:
+        raise ValueError('Faltan columnas de rubros')
+    validate_value_column(df, 3, selected_period)
+    _, label = period(selected_period)
+    records, found = [], set()
+    parent = None
+    for _, row in df.iterrows():
+        title = normalize(row[1]) if not pd.isna(row[1]) else ''
+        child = str(row[2]).strip() if not pd.isna(row[2]) else ''
+        matched = next((key for key in parents if title == key), None)
+        if matched:
+            if matched in found:
+                raise ValueError('Rubro principal duplicado')
+            found.add(matched)
+            parent = parents[matched]
+            child = 'TOTAL'
+        elif title:
+            # An unknown parent must not attach children to the previous one.
+            parent = None
+            continue
+        elif not parent or not child or 'total' in normalize(child):
+            continue
+        value = number(row[3], localized=True)
+        if value < 0:
+            raise ValueError('Rubro negativo')
+        records.append({'rubro_principal': parent, 'subrubro': child, 'valor_usd': value,
+                        'tipo_flujo': flow, 'fecha_informe': label})
+    if found != set(parents):
+        raise ValueError('Faltan rubros principales esperados')
+    validate_hierarchy(records)
+    return records
+
+
+def find_sheet(workbook, parents, selected_period):
+    matches = []
+    for sheet in workbook.sheet_names:
+        df = pd.read_excel(workbook, sheet, header=None)
+        if len(df.columns) < 4:
+            continue
+        labels = {normalize(v) for v in df.iloc[:, 1].dropna()}
+        if set(parents).issubset(labels):
+            # Some reports contain both current and accumulated tables.
+            # Do not choose one silently when detection is ambiguous.
+            validate_sheet(df, selected_period)
+            matches.append(df)
+    if len(matches) != 1:
+        raise ValueError('No se identificó una única hoja mensual de rubros')
+    return matches[0]
+
+
+def main(argv=None):
+    args = excel_arguments(__doc__).parse_args(argv)
+    period(args.period)
+    workbook = read_workbook(download(args.excel_url, 'www.indec.gob.ar'))
     try:
-        if isinstance(val, str):
-            val = val.strip().replace('\xa0', '').replace(' ', '').replace(',', '.')
-            if val in ['-', '///', '', 's/d', '.']: return 0.0
-        num = float(val)
-        if num > 10000000: num = num / 1000000.0
-        return round(num, 2)
-    except ValueError:
-        return 0.0
+        records = []
+        for flow, parents in [('Exportacion', EXPORTS), ('Importacion', IMPORTS)]:
+            records.extend(extraer_datos_rubros(find_sheet(workbook, parents, args.period),
+                                              flow, parents, args.period))
+    finally:
+        workbook.close()
+    publish('comex_rubros', records,
+            ('fecha_informe', 'tipo_flujo', 'rubro_principal', 'subrubro'), args.write,
+            reviewed_sha256=args.reviewed_sha256)
 
-def extraer_datos_rubros(df, tipo_flujo, mapeo_padres):
-    datos = []
-    padre_actual = None
-    for index, row in df.iterrows():
-        rubro_col = str(row[1]).strip() if not pd.isna(row[1]) else ""
-        subrubro_col = str(row[2]).strip() if not pd.isna(row[2]) else ""
-        valor = limpiar_numero(row[3])
 
-        # 1. Detectar si es un Rubro Padre (Columna B)
-        es_padre = False
-        for key, nombre_db in mapeo_padres.items():
-            if rubro_col.lower().startswith(key):
-                padre_actual = nombre_db
-                es_padre = True
-                if valor > 0:
-                    datos.append({
-                        "rubro_principal": nombre_db, "subrubro": "TOTAL", 
-                        "valor_usd": valor, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME
-                    })
-                break
-        
-        # 2. Detectar si es un Subrubro Hijo (Columna C)
-        if padre_actual and not es_padre and subrubro_col:
-            if valor > 0 and len(subrubro_col) > 3 and "total" not in subrubro_col.lower():
-                datos.append({
-                    "rubro_principal": padre_actual, "subrubro": subrubro_col, 
-                    "valor_usd": valor, "tipo_flujo": tipo_flujo, "fecha_informe": MES_INFORME
-                })
-    return datos
-
-if __name__ == "__main__":
-    try:
-        print(f"📥 Descargando {EXCEL_URL}...")
-        resp = requests.get(EXCEL_URL, headers=DEFAULT_HEADERS, timeout=30)
-        resp.raise_for_status()
-        
-        # Cargamos el Excel en memoria una sola vez
-        xl = pd.ExcelFile(BytesIO(resp.content), engine='xlrd')
-        
-        # --- 1. TOTALES MAESTROS ---
-        df_c12 = pd.read_excel(xl, HOJA_EXPO, header=None)
-        df_c14 = pd.read_excel(xl, HOJA_IMPO, header=None)
-        
-        total_expo = 0.0
-        for i, r in df_c12.iterrows():
-            if not pd.isna(r[0]) and "total" in str(r[0]).strip().lower(): 
-                total_expo = limpiar_numero(r[3])
-                break
-        
-        total_impo = 0.0
-        for i, r in df_c14.iterrows():
-            if not pd.isna(r[0]) and "total" in str(r[0]).strip().lower(): 
-                total_impo = limpiar_numero(r[3])
-                break
-        
-        saldo = round(total_expo - total_impo, 2)
-        print(f"📊 Totales: Expo {total_expo} | Impo {total_impo} | Saldo {saldo}")
-
-        # --- 2. RUBROS DETALLADOS ---
-        rubros_data = []
-        mapeo_expo = {"productos primarios": "Productos primarios (PP)", "manufacturas de origen agropecuario": "Manufacturas de origen agropecuario (MOA)", "manufacturas de origen industrial": "Manufacturas de origen industrial (MOI)", "combustibles y energía": "Combustibles y energía (CyE)"}
-        rubros_data.extend(extraer_datos_rubros(df_c12, "Exportacion", mapeo_expo))
-
-        mapeo_impo = {"bienes de capital": "Bienes de capital (BK)", "bienes intermedios": "Bienes intermedios (BI)", "combustibles y lubricantes": "Combustibles y lubricantes (CyL)", "piezas y accesorios para bienes de capital": "Piezas y accesorios para bienes de capital (PyA)", "bienes de consumo": "Bienes de consumo (BC)", "vehículos automotores de pasajeros": "Vehículos automotores de pasajeros (VA)"}
-        rubros_data.extend(extraer_datos_rubros(df_c14, "Importacion", mapeo_impo))
-
-        # --- 3. PAÍSES ---
-        df_paises = pd.read_excel(xl, HOJA_PAISES, header=None)
-        paises_obj = ["Brasil", "China", "Estados Unidos", "Chile", "Paraguay", "Vietnam", "India", "Alemania"]
-        socios_data = []
-        temp_p = {p.lower(): {"pais": p, "exportaciones": 0.0, "importaciones": 0.0} for p in paises_obj}
-        
-        for idx, row in df_paises.iterrows():
-            p_e_name = str(row[0]).strip().lower() if not pd.isna(row[0]) else ""
-            p_i_name = str(row[4]).strip().lower() if not pd.isna(row[4]) else ""
-            for p in paises_obj:
-                if p.lower() in p_e_name: temp_p[p.lower()]["exportaciones"] = limpiar_numero(row[1])
-                if p.lower() in p_i_name: temp_p[p.lower()]["importaciones"] = limpiar_numero(row[5])
-
-        for d in temp_p.values():
-            if d["exportaciones"] > 0 or d["importaciones"] > 0:
-                d["saldo_comercial"] = round(d["exportaciones"] - d["importaciones"], 2)
-                d["fecha_informe"] = MES_INFORME
-                socios_data.append(d)
-
-        # --- 4. SUBIDA (CON BORRADO PREVIO PARA EVITAR ERROR UNIQUE) ---
-        print("\n📤 Subiendo datos finales...")
-        
-        # Tabla datos_comex
-        supabase.table("datos_comex").delete().eq("fecha", FECHA_DB).execute()
-        supabase.table("datos_comex").insert({
-            "fecha": FECHA_DB, 
-            "exportaciones_usd_millions": total_expo, 
-            "importaciones_usd_millions": total_impo, 
-            "saldo_usd_millions": saldo
-        }).execute()
-        
-        # Tabla comex_rubros
-        if rubros_data:
-            supabase.table("comex_rubros").delete().eq("fecha_informe", MES_INFORME).execute()
-            supabase.table("comex_rubros").insert(rubros_data).execute()
-            
-        # Tabla socios_comerciales
-        if socios_data:
-            supabase.table("socios_comerciales").delete().eq("fecha_informe", MES_INFORME).execute()
-            supabase.table("socios_comerciales").insert(socios_data).execute()
-        
-        print(f"✅ ¡ÉXITO! Totales, {len(rubros_data)} rubros y socios cargados.")
-        
-    except requests.exceptions.RequestException as e:
-        print(f"⚠️ Error de red descargando el Excel: {e}")
-    except Exception as e: 
-        print(f"❌ Error crítico general: {e}")
+if __name__ == '__main__':
+    raise SystemExit(cli(main))
