@@ -1,0 +1,89 @@
+name: EC-016 manual - SHA autorizado - NO APTO PARA PRODUCCION
+
+on:
+  workflow_dispatch:
+    inputs:
+      lab_sha:
+        description: 'SHA completo revisado del laboratorio (40 caracteres hexadecimales)'
+        required: true
+        type: string
+      confirmation:
+        description: 'Escribir EC016_DISPOSABLE_ONLY: seguido del mismo SHA completo'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ec016-manual-laboratory
+  cancel-in-progress: false
+
+jobs:
+  disposable-integration:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'argentinomics2025/EDD' &&
+      github.event.repository.private == false &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      EC016_GITHUB_DISPOSABLE: EC016_DISPOSABLE_ONLY
+      EC016_SOURCE_SHA: ${{ inputs.lab_sha }}
+      EC016_MANUAL_CONFIRMATION: ${{ inputs.confirmation }}
+      EC016_APPROVED_SHA: ${{ vars.EC016_APPROVED_SHA }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      # Trusted policy lives ONLY in main; no experimental checkout before this step.
+      # Single-operator authorization, deliberately NOT a simulated second review.
+      - name: Autorizar SHA exacto antes de descargar codigo experimental
+        id: authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, sys
+          e = os.environ
+          sha = e.get('EC016_SOURCE_SHA', '')
+          approved = e.get('EC016_APPROVED_SHA', '')
+          with open(e['GITHUB_EVENT_PATH']) as event_file:
+              event = json.load(event_file)
+          fixed = {
+              'GITHUB_ACTIONS': 'true',
+              'GITHUB_EVENT_NAME': 'workflow_dispatch',
+              'GITHUB_REPOSITORY': 'argentinomics2025/EDD',
+              'GITHUB_REF': 'refs/heads/main',
+              'GITHUB_WORKFLOW_REF': 'argentinomics2025/EDD/.github/workflows/ec016_integration.yml@refs/heads/main',
+              'RUNNER_ENVIRONMENT': 'github-hosted',
+              'RUNNER_OS': 'Linux', 'RUNNER_ARCH': 'X64', 'ImageOS': 'ubuntu24',
+          }
+          valid = (
+              all(e.get(k) == v for k, v in fixed.items())
+              and e.get('GITHUB_RUN_ATTEMPT') == '1'
+              and re.fullmatch('[a-f0-9]{40}', sha) is not None
+              and sha == approved
+              and e.get('EC016_MANUAL_CONFIRMATION') == 'EC016_DISPOSABLE_ONLY:' + sha
+              and event.get('repository', {}).get('private') is False
+              and event.get('repository', {}).get('full_name') == 'argentinomics2025/EDD'
+              and event.get('inputs', {}).get('lab_sha') == sha
+              and event.get('inputs', {}).get('confirmation') == 'EC016_DISPOSABLE_ONLY:' + sha
+          )
+          if not valid:
+              sys.exit('EC016_DENIED: contexto o autorizacion de SHA invalida; no se descarga el laboratorio.')
+          with open(e['GITHUB_OUTPUT'], 'a') as output:
+              output.write('sha=' + sha + '\n')
+          PY
+      - name: Checkout del SHA aprobado sin credenciales persistentes
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ steps.authorization.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+      - name: Escaneo obligatorio y once pruebas sinteticas con salida saneada
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m infra.ec016.github_runner

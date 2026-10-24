@@ -1,0 +1,3 @@
+# Intentionally non-runnable: use python -m infra.ec016.labctl prepare.
+# Generated per-run Compose JSON is validated before any create/start operation.
+services: {}

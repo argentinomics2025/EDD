@@ -1,0 +1,5 @@
+{
+  "engine_id": null,
+  "nonproduction_reviewed": false,
+  "socket": "unix:///var/run/docker.sock"
+}

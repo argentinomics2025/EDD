@@ -1,0 +1,38 @@
+{
+  "platform": "linux/amd64",
+  "images": {
+    "postgres": {
+      "repository": "library/postgres",
+      "tag": "16.14-bookworm",
+      "digest": "sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8",
+      "verified_at": "2026-10-24T17:38:16.955481+00:00",
+      "status": "manifest_digest_verified",
+      "manifest_url": "https://registry-1.docker.io/v2/library/postgres/manifests/16.14-bookworm",
+      "manifest_file": "postgres-manifest.json",
+      "amd64_manifest_digest": "sha256:714b08dd70c05160db032e4321033ac4e5b6328935b2d03ed419c3a898aa8219",
+      "reference": "docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8"
+    },
+    "postgrest": {
+      "repository": "postgrest/postgrest",
+      "tag": "v12.2.12",
+      "digest": "sha256:5f4ce744539bbba786b4e24dbbd95bdb2a956dcf568c5374995a0ff4a68f5bd2",
+      "verified_at": "2026-10-24T17:38:16.869075+00:00",
+      "status": "manifest_digest_verified",
+      "manifest_url": "https://registry-1.docker.io/v2/postgrest/postgrest/manifests/v12.2.12",
+      "manifest_file": "postgrest-manifest.json",
+      "amd64_manifest_digest": "sha256:be3b6ab31a94e3e89f08edad40be0234ae0951e3297f2043d797c219165f5afa",
+      "reference": "docker.io/postgrest/postgrest:v12.2.12@sha256:5f4ce744539bbba786b4e24dbbd95bdb2a956dcf568c5374995a0ff4a68f5bd2"
+    },
+    "python": {
+      "repository": "library/python",
+      "tag": "3.12.14-slim-bookworm",
+      "digest": "sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e",
+      "verified_at": "2026-10-24T17:38:16.858204+00:00",
+      "status": "manifest_digest_verified",
+      "manifest_url": "https://registry-1.docker.io/v2/library/python/manifests/3.12.14-slim-bookworm",
+      "manifest_file": "python-manifest.json",
+      "amd64_manifest_digest": "sha256:1aaa65a85fda306ffb8b910824d4e93bdce61e212c7e87168123ea3073b41a1a",
+      "reference": "docker.io/library/python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e"
+    }
+  }
+}

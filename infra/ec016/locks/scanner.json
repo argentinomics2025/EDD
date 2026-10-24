@@ -1,0 +1,14 @@
+{
+  "platform": "linux/amd64",
+  "image": {
+    "repository": "aquasec/trivy",
+    "tag": "0.69.3",
+    "digest": "sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c",
+    "verified_at": "2026-10-24T17:38:16.820503+00:00",
+    "status": "manifest_digest_verified",
+    "manifest_url": "https://registry-1.docker.io/v2/aquasec/trivy/manifests/0.69.3",
+    "manifest_file": "scanner-manifest.json",
+    "amd64_manifest_digest": "sha256:7228e304ae0f610a1fad937baa463598cadac0c2ac4027cc68f3a8b997115689",
+    "reference": "docker.io/aquasec/trivy:0.69.3@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c"
+  }
+}
