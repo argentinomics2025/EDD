@@ -17,8 +17,9 @@ class FixtureRunnerTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        data = {col: [1] for col in bot_comex.MAPPING}
+        data = {col: [1] for col in bot_comex.SOURCE_COLUMNS}
         data['indice_tiempo'] = ['2026-01-01']
+        data['ica_expo_totales'] = [4]
         data['ica_importaciones_totales'] = [3]
         data['ica_saldo_comercial'] = [1]
         self.file = self.root / 'synthetic.csv'

@@ -169,3 +169,10 @@ pendientes; no se universalizan tolerancias a otros layouts. Los XLS binarios no
 se incluyen en el commit. Sin ellos, CI ejecutará los snapshots y omitirá
 explícitamente OriginalWorkbookTests: no debe confundirse con 94 tests sobre
 originales ejecutados en GitHub. El estado de Actions se informa aparte.
+
+## Avance local COMEX
+
+El CSV adjunto se revisó y su interpretación offline se corrigió localmente.
+Véase [ec-015-comex-corrections.md](ec-015-comex-corrections.md). Las afirmaciones
+anteriores de CSV ausente corresponden a esa etapa histórica. Avance de revisión; validación económica independiente, metodología de revisiones
+e integración PostgreSQL/PostgREST descartable siguen pendientes.

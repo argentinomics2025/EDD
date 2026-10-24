@@ -155,3 +155,10 @@ Inventario, contratos, matriz y procedimiento offline en
 [ec-015-official-fixtures.md](ec-015-official-fixtures.md). El runner local
 no descarga ni persiste y exige SHA256 de los bytes; sin referencia revisada
 retorna pendiente, no aprobado. No se validaron archivos oficiales.
+
+## Avance local COMEX
+
+El CSV adjunto se revisó y su interpretación offline se corrigió localmente.
+Véase [ec-015-comex-corrections.md](ec-015-comex-corrections.md). Las afirmaciones
+anteriores de CSV ausente corresponden a esa etapa histórica. Avance de revisión; validación económica independiente, metodología de revisiones
+e integración PostgreSQL/PostgREST descartable siguen pendientes.

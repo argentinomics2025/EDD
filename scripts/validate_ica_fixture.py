@@ -30,8 +30,11 @@ def validate_local(path, kind, sha256, selected_period=None, reference_path=None
     if kind == 'csv':
         if selected_period is not None:
             raise ValueError('CSV valida la serie completa; no filtra períodos')
-        records = bot_comex.parse_csv(content)
-        report['columns'] = list(pd.read_csv(path, nrows=0).columns)
+        inspection = bot_comex.read_csv_offline(content)
+        records = inspection['records']
+        report['csv_evidence'] = {key: value for key, value in inspection.items() if key != 'records'}
+        report['dataset_id'] = f'{actual_hash}:csv:all_periods'
+        report['columns'] = inspection['columns']
         report['date_range'] = [min(r['fecha'] for r in records), max(r['fecha'] for r in records)]
     else:
         common.period(selected_period or '')

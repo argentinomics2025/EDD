@@ -28,8 +28,9 @@ class ICATests(unittest.TestCase):
         ])
 
     def csv(self):
-        data = {key: [1] for key in comex.MAPPING}
+        data = {key: [1] for key in comex.SOURCE_COLUMNS}
         data['indice_tiempo'] = ['2026-01-01']
+        data['ica_expo_totales'] = [4]
         data['ica_importaciones_totales'] = [3]
         data['ica_saldo_comercial'] = [1]
         return pd.DataFrame(data)
