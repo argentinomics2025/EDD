@@ -91,7 +91,7 @@ class FixtureRunnerTests(unittest.TestCase):
             ['Brasil', 10, None, None, 'India', 7],
         ])
         workbook = Mock(); workbook.sheet_names = ['synthetic']
-        with patch.object(runner.common, 'read_workbook', return_value=workbook), \
+        with patch.object(runner.ica_xls_layout, 'workbook_provenance', return_value={}), patch.object(runner.common, 'read_workbook', return_value=workbook), \
              patch.object(runner.pd, 'read_excel', return_value=frame), \
              patch.object(runner.bot_ica, 'detectar_pestana_totales', return_value='synthetic'):
             report = runner.validate_local(self.file, 'countries', self.sha, '2026-01')
@@ -102,6 +102,6 @@ class FixtureRunnerTests(unittest.TestCase):
 
     def test_workbook_closed_on_parser_failure(self):
         workbook = Mock(); workbook.sheet_names = []
-        with patch.object(runner.common, 'read_workbook', return_value=workbook), self.assertRaises(ValueError):
+        with patch.object(runner.ica_xls_layout, 'workbook_provenance', return_value={}), patch.object(runner.common, 'read_workbook', return_value=workbook), self.assertRaises(ValueError):
             runner.validate_local(self.file, 'rubros', self.sha, '2026-01')
         workbook.close.assert_called_once()

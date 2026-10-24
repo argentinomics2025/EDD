@@ -7,6 +7,11 @@ except ImportError:
     from ica_common import (normalize, number, period, validate_sheet, validate_value_column, download,
                             read_workbook, excel_arguments, publish, cli)
 
+try:
+    from . import ica_xls_layout as xls_layout
+except ImportError:
+    import ica_xls_layout as xls_layout
+
 EXPORTS = {'productos primarios': 'Productos primarios (PP)',
            'manufacturas de origen agropecuario': 'Manufacturas de origen agropecuario (MOA)',
            'manufacturas de origen industrial': 'Manufacturas de origen industrial (MOI)',
@@ -50,6 +55,8 @@ def validate_hierarchy(records, *, disjoint=False, exhaustive=False):
 
 
 def extraer_datos_rubros(df, flow, parents, selected_period):
+    if xls_layout.rubros_title(df, flow):
+        return xls_layout.parse_rubros(df, flow, parents, selected_period)
     validate_sheet(df, selected_period)
     if len(df.columns) < 4:
         raise ValueError('Faltan columnas de rubros')
@@ -86,16 +93,20 @@ def extraer_datos_rubros(df, flow, parents, selected_period):
 
 def find_sheet(workbook, parents, selected_period):
     matches = []
+    flow = 'Exportacion' if parents == EXPORTS else 'Importacion'
     for sheet in workbook.sheet_names:
         df = pd.read_excel(workbook, sheet, header=None)
-        if len(df.columns) < 4:
+        if df.empty or len(df.columns) < 4 or not xls_layout.rubros_title(df, flow):
             continue
-        labels = {normalize(v) for v in df.iloc[:, 1].dropna()}
-        if set(parents).issubset(labels):
-            # Some reports contain both current and accumulated tables.
-            # Do not choose one silently when detection is ambiguous.
-            validate_sheet(df, selected_period)
-            matches.append(df)
+        try:
+            xls_layout.monthly_title(df, selected_period)
+        except ValueError:
+            continue
+        # Fail a malformed candidate rather than silently omitting it.
+        xls_layout.parent_column(df, parents)
+        xls_layout.monthly_column(df, selected_period)
+        df.attrs['ica_sheet_name'] = sheet
+        matches.append(df)
     if len(matches) != 1:
         raise ValueError('No se identificó una única hoja mensual de rubros')
     return matches[0]

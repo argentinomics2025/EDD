@@ -1,5 +1,10 @@
 # ICA — revisión del Draft PR #1
 
+> Estado local posterior: los dos XLS adjuntos ya tienen correcciones de lectura
+> y validación estructural. Véase [informe de correcciones](ec-015-parser-corrections.md).
+> Los estados de preparación/fallo descritos abajo son históricos; la validación
+> económica independiente y producción siguen pendientes. No se publicaron estos cambios.
+
 **NO APTO PARA PRODUCCIÓN. No integrar ni desplegar.**
 No se descargaron archivos oficiales, ejecutaron migraciones ni contactó
 Supabase. Solo se modificó `fix/ica-safe-ingestion` para revisión.

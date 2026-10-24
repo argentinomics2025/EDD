@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 from . import ica_common as common
-from . import bot_comex, bot_ica, bot_ica_rubros
+from . import bot_comex, bot_ica, bot_ica_rubros, ica_xls_layout
 
 KEYS = {
     'csv': ('fecha',),
@@ -37,6 +37,10 @@ def validate_local(path, kind, sha256, selected_period=None, reference_path=None
         common.period(selected_period or '')
         workbook = common.read_workbook(content)
         try:
+            report['source_metadata'] = ica_xls_layout.workbook_provenance(content, selected_period)
+            report['dataset_id'] = f'{actual_hash}:{kind}:{selected_period}'
+            report['layout_audits'] = []
+            precision_cells = []
             report['sheets'] = []
             for name in workbook.sheet_names:
                 frame = pd.read_excel(workbook, name, header=None)
@@ -44,15 +48,33 @@ def validate_local(path, kind, sha256, selected_period=None, reference_path=None
                     'first_15_rows': [[None if pd.isna(v) else str(v) for v in row]
                                       for row in frame.head(15).to_numpy()]})
             if kind == 'countries':
-                sheet = bot_ica.detectar_pestana_totales(workbook)
+                sheet = bot_ica.detectar_pestana_totales(workbook, selected_period)
                 report['selected_sheet'] = sheet
-                records = bot_ica.parse_countries(pd.read_excel(workbook, sheet, header=None), selected_period)
+                frame = pd.read_excel(workbook, sheet, header=None)
+                records = bot_ica.parse_countries(frame, selected_period)
+                audit = frame.attrs.get('ica_audit', {})
+                report['layout_audits'].append(dict(audit, sheet=sheet))
+                for section in audit.get('sections', []):
+                    precision_cells.extend(dict(cell, sheet=sheet, flow=section['flow'])
+                                           for cell in section['observations'])
+                    precision_cells.extend(dict(section[key], sheet=sheet, flow=section['flow'], role=key)
+                                           for key in ('total_cell','remainder_cell'))
             else:
                 records = []
                 for flow, parents in [('Exportacion', bot_ica_rubros.EXPORTS),
                                       ('Importacion', bot_ica_rubros.IMPORTS)]:
                     frame = bot_ica_rubros.find_sheet(workbook, parents, selected_period)
                     records.extend(bot_ica_rubros.extraer_datos_rubros(frame, flow, parents, selected_period))
+                    audit = frame.attrs.get('ica_audit', {})
+                    name = frame.attrs.get('ica_sheet_name')
+                    report['layout_audits'].append(dict(audit, sheet=name))
+                    precision_cells.extend(dict(cell, sheet=name, flow=flow) for cell in audit.get('evidence', []))
+                    if audit.get('national_total'):
+                        precision_cells.append(dict(audit['national_total'],sheet=name,flow=flow,role='national_total'))
+            report['cell_precision'] = [dict(cell, dataset_id=report['dataset_id'],
+                statistical_period=selected_period,
+                source_edition_date=report['source_metadata'].get('source_edition_date'))
+                for cell in ica_xls_layout.cell_precision(content, precision_cells)]
         finally:
             workbook.close()
     common.validate_records(records, KEYS[kind])
@@ -74,7 +96,10 @@ def validate_local(path, kind, sha256, selected_period=None, reference_path=None
         if actual != expected:
             raise ValueError('Diferencia frente a referencia independiente; revisar filas y valores')
         report['reference_match'] = True
-    report['compatibility'] = 'pending_official_metadata_and_schema_review'
+    report['structural_validation'] = 'passed'
+    report['independent_economic_validation'] = 'not_certified_by_this_runner'
+    report['compatibility'] = ('structure_verified_independent_economic_and_schema_pending' if kind != 'csv'
+                               else 'pending_official_metadata_and_schema_review')
     return report
 
 

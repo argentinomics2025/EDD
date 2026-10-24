@@ -8,6 +8,11 @@ except ImportError:
     from ica_common import (normalize, country_identity, number, period, validate_sheet, validate_value_column, download,
                             read_workbook, excel_arguments, publish, cli)
 
+try:
+    from . import ica_xls_layout as xls_layout
+except ImportError:
+    import ica_xls_layout as xls_layout
+
 EXCLUDED = {'total', 'resto', 'mercosur', 'union europea', 'asean', 'magreb',
             'usmca', 'pais', 'paises', 's/d', 'moi', 'moa', 'pp', 'cye'}
 
@@ -23,12 +28,17 @@ def country_name(value):
     return country_identity(name)
 
 
-def detectar_pestana_totales(workbook):
+def detectar_pestana_totales(workbook, selected_period=None):
     candidates = []
     for sheet in workbook.sheet_names:
         df = pd.read_excel(workbook, sheet_name=sheet, nrows=15, header=None)
         text = normalize(' '.join(str(v) for v in df.to_numpy().flat))
         if 'principales paises' in text and 'segun exportaciones, importaciones, saldo e intercambio' in text:
+            if selected_period is not None:
+                try:
+                    xls_layout.monthly_title(df, selected_period)
+                except ValueError:
+                    continue
             candidates.append(sheet)
     if len(candidates) != 1:
         raise ValueError('No se identificó una única hoja de socios comerciales')
@@ -36,6 +46,8 @@ def detectar_pestana_totales(workbook):
 
 
 def parse_countries(df, selected_period):
+    if xls_layout.countries_title(df):
+        return xls_layout.parse_countries(df, selected_period)
     validate_sheet(df, selected_period)
     if len(df.columns) < 6:
         raise ValueError('Faltan columnas de socios')
@@ -84,7 +96,7 @@ def main(argv=None):
     period(args.period)
     workbook = read_workbook(download(args.excel_url, 'www.indec.gob.ar'))
     try:
-        sheet = detectar_pestana_totales(workbook)
+        sheet = detectar_pestana_totales(workbook, args.period)
         records = parse_countries(pd.read_excel(workbook, sheet, header=None), args.period)
     finally:
         workbook.close()

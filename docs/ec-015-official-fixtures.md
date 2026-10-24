@@ -1,5 +1,10 @@
 # EC-015 — inventario y compatibilidad ICA/COMEX
 
+> Estado local posterior: los dos XLS adjuntos ya tienen correcciones de lectura
+> y validación estructural. Véase [informe de correcciones](ec-015-parser-corrections.md).
+> Los estados de preparación/fallo descritos abajo son históricos; la validación
+> económica independiente y producción siguen pendientes. No se publicaron estos cambios.
+
 **NO APTO PARA PRODUCCIÓN.** Preparación offline; no se descargaron archivos,
 contactó Supabase ni ejecutaron migraciones. Las escrituras siguen bloqueadas.
 
