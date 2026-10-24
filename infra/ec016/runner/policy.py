@@ -95,6 +95,14 @@ def canonical_service(service):
     """Only documented, semantics-preserving Compose representations."""
     import copy
     value=copy.deepcopy(service)
+    # Compose renders image-inherited defaults as explicit null (not [] or '').
+    for key in ('command','entrypoint'):
+        if key in value and value[key] is None:value.pop(key)
+    # Compose's normalized bind object omits the false boolean. Preserve every
+    # other option and reject true; do not equate a missing bind object with {}.
+    for mount in value.get('volumes',[]):
+        if mount.get('type')=='bind' and isinstance(mount.get('bind'),dict):
+            mount['bind'].setdefault('create_host_path',False)
     dependencies=value.get('depends_on',{})
     if isinstance(dependencies,list):
         dependencies={name:{'condition':'service_started'} for name in dependencies}
@@ -105,6 +113,9 @@ def canonical_service(service):
     memory=value.get('mem_limit')
     if isinstance(memory,str) and re.fullmatch(r'[0-9]+m',memory):
         value['mem_limit']=int(memory[:-1])*1024*1024
+    elif isinstance(memory,str) and re.fullmatch(r'[0-9]+',memory):
+        # Compose JSON emits byte counts as decimal strings, not JSON numbers.
+        value['mem_limit']=int(memory)
     return value
 
 

@@ -300,3 +300,58 @@ Python 3.10.22 y Python 3.12.14** (incluidos 10 tests diagnósticos nuevos; sin
 Docker ni servicios externos). No se modifican main, su workflow, variables
 GitHub, dependencias ni políticas de escritura. Las pruebas locales no identifican
 por sí mismas la causa de la ejecución remota reportada.
+
+
+## Corrección puntual COMPOSE_SERVICE_OPTIONS
+
+Se reprodujo con el cliente Docker Compose **2.40.3**, sin daemon: cada comando
+`config --format json` seleccionó explícitamente un socket Unix inexistente,
+configuración Docker vacía y entorno mínimo. No se consultó el daemon compartido,
+no se crearon contenedores ni se ejecutó SQL. La versión exacta del cliente del
+run GitHub no consta en el diagnóstico compartido; no se afirma haberla medido.
+
+La comparación del commit c49878fc falla con la salida real por estas claves
+adicionales, cuyos valores son todos null:
+- ec016-db: command.
+- ec016-api: command, entrypoint.
+- ec016-tests: entrypoint.
+
+Compose usa null para heredar los defaults de la imagen, equivalente a omitir
+esas claves. Se eliminan **sólo esos dos valores null** durante la comparación.
+Una lista vacía, cadena vacía o comando explícito sigue siendo un override y se
+rechaza si no estaba autorizado. Si se quita el entrypoint obligatorio de DB o
+el comando de tests mediante null, también se rechaza.
+
+En la misma salida real se comprobaron otras dos diferencias de representación
+que quedaban ocultas detrás del primer rechazo:
+- bind.create_host_path=false se serializa como bind: {}. Se completa únicamente
+  ese booleano ausente con false dentro de un objeto bind existente. El cliente
+  conserva create_host_path=true como true y el validador lo rechaza. Un objeto
+  bind ausente y cualquier otra opción de montaje no se normalizan ni ignoran.
+- mem_limit se serializa como cadena decimal de bytes (805306368, 268435456,
+  536870912). Se convierte a entero exacto; cualquier límite diferente se rechaza.
+
+No se añade una allowlist genérica de claves ni se ignoran opciones desconocidas.
+Puertos, privilegios, dispositivos, capacidades, red host, montajes/volúmenes,
+DNS, variables, comandos y límites siguen comparándose o rechazándose igual.
+No se cambia la infraestructura, el workflow estable, dependencias o aprobaciones.
+
+Fixture independiente: tests/fixtures/ec016/compose-2.40.3-config.json contiene
+plan y salida auténtica del cliente, versión/hash del binario y únicamente dos
+prefijos de rutas sustituidos por tokens. No fue generado por el validador ni
+contiene credenciales reales. Las nueve regresiones verifican la salida completa
+y los rechazos negativos. El comando config real también pasó con el correctivo,
+y rechazó create_host_path=true y entrypoint=[] sin contactar un daemon.
+
+Referencia de semántica de command/entrypoint:
+https://docs.docker.com/reference/compose-file/services/#command
+https://docs.docker.com/reference/compose-file/services/#entrypoint
+
+
+Validación final de este correctivo: **188 pruebas sin SQL aprobadas, 0 fallidas,
+en Python 3.10.22 y Python 3.12.14**, mediante infra.ec016.check_local, que bloquea
+SQLite y conexiones de red. Incluye las nueve regresiones nuevas. Incidente de
+validación: antes se ejecutaron por error los diez tests SQLite en memoria de
+la suite general en ambas versiones, pese a la restricción. No hubo PostgreSQL,
+servicios externos ni datos productivos. La selección final fue corregida.
+El commit solicita omitir CI automático ([skip ci]); no se despacha Actions.
