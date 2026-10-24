@@ -253,3 +253,50 @@ tests/test_ec016_completion.py
 tests/test_ec016_github_preparation.py
 tests/test_ec016_preparation.py
 ```
+
+
+## Corrección del primer fallo real: diagnósticos seguros por etapa
+
+El primer intento reportado aprobó autorización/checkout de ec00637e y terminó
+con EC016_FAILED en aproximadamente ocho segundos. Se comprobó por Git que el
+workflow actual de main (d57aef97cbc4d4caf3e3687c573900f1f64976d3) coincide
+exactamente con la plantilla publicada (SHA256 del archivo
+11d937f7d58ea185d8fb4c6f80c95b0ad4a125fe8a437f3550f7105a73db538d).
+La API de logs devuelve 403. **No se puede demostrar la causa original ni
+atribuirla al contexto, Docker o Compose por la duración solamente.**
+
+Defecto demostrado y corregido: se perdía toda identificación de la excepción
+original. Ahora se emiten únicamente registros JSON con claves ec016_stage,
+status y code de vocabulario fijo. Etapas: CONTEXT, ENGINE, PREFLIGHT, SCAN,
+NETWORK, BOOTSTRAP, INTEGRATION y CLEANUP; estados START, OK y FAILED.
+No se publican excepciones, comandos, stdout/stderr externos, rutas, valores de
+entorno ni credenciales. Se conserva el exit code 1 ante cualquier fallo.
+
+Motivos concretos permiten distinguir, sin datos sensibles, rechazo de contexto,
+overrides de conexión, identidad/réplica, checkout, sistema operativo, inventario
+Docker no vacío, consulta/version de Compose y opciones de configuración efectiva.
+Por ejemplo ENGINE/COMPOSE_VERSION significa versión rechazada; no afirma que
+ese haya sido el motivo del primer intento. PREFLIGHT/COMPOSE_SERVICE_OPTIONS
+identifica una opción efectiva no admitida, sin revelar su contenido. Un error
+no reconocido se publica como CHECK_FAILED. No se relaja ninguna protección.
+
+La limpieza falla de forma independiente y **no sustituye el fallo primario**.
+Las regresiones inyectan fallos en las ocho etapas, errores de proceso/timeout y
+texto sensible sintético, comprueban ausencia de filtraciones y reproducen el
+problema de pérdida de diagnóstico. No son una reproducción del fallo histórico,
+cuya causa sigue pendiente de la evidencia del próximo run.
+
+Siguiente acción del responsable autorizado: configurar EC016_APPROVED_SHA con
+el SHA completo del commit correctivo publicado y realizar un **nuevo** despacho
+manual desde main, lab_sha igual a ese SHA y confirmation igual a
+EC016_DISPOSABLE_ONLY: seguido de ese mismo SHA. No usar Re-run jobs ni el SHA
+anterior. El asistente no cambia la variable, el workflow de main ni ejecuta el
+laboratorio. Si vuelve a fallar, conservar el último registro FAILED (sólo etapa
+y código fijo); no publicar los logs crudos de servicios.
+
+
+Validación del correctivo: **189 pruebas habituales aprobadas, 0 fallidas, en
+Python 3.10.22 y Python 3.12.14** (incluidos 10 tests diagnósticos nuevos; sin
+Docker ni servicios externos). No se modifican main, su workflow, variables
+GitHub, dependencias ni políticas de escritura. Las pruebas locales no identifican
+por sí mismas la causa de la ejecución remota reportada.

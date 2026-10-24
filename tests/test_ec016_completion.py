@@ -130,7 +130,7 @@ class CompletionTests(unittest.TestCase):
     def test_scan_and_firewall_precede_bootstrap(self):
         code=(ROOT/'infra/ec016/github_runner.py').read_text()
         self.assertLess(code.index('scan_before_bootstrap(state'),code.index("'container','start',by_role['ec016-db']"))
-        self.assertLess(code.index('verify_clearance(state'),code.index("'container','start',by_role['ec016-db']"))
+        self.assertLess(code.index("operation('SECURITY_BINDING',verify_clearance"),code.index("'container','start',by_role['ec016-db']"))
         entry=(ROOT/'infra/ec016/db-entrypoint.sh').read_text()
         self.assertLess(entry.index('security.ok'),entry.index('exec /usr/local/bin/docker-entrypoint.sh'))
 

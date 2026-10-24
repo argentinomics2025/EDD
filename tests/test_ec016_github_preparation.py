@@ -141,8 +141,9 @@ class GithubPreparation(unittest.TestCase):
         context=hosted.validate_host_context(environment(),event())
         info=json.dumps({'ID':'synthetic-engine-12345','OSType':'linux','Architecture':'x86_64'})
         with patch.object(hosted,'validate_host_context',return_value=context),patch.object(hosted,'_command',side_effect=[info,'foreign-id']) as command:
-            with self.assertRaisesRegex(RuntimeError,'Fresh job daemon'):
+            with self.assertRaises(hosted.Failure) as failure:
                 hosted.inspect_fresh_engine(Path('/tmp/synthetic-docker-config'))
+        self.assertEqual((failure.exception.stage,failure.exception.code),('ENGINE','ENGINE_NOT_EMPTY'))
         self.assertEqual(command.call_count,2)
 
     def test_subprocess_does_not_inherit_tokens_or_proxies(self):

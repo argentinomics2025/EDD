@@ -13,6 +13,7 @@ import tempfile
 import time
 from . import labctl
 from .runner import policy
+from .diagnostics import Failure, classify, emit, fail, operation, stage
 
 REPOSITORY='argentinomics2025/EDD'
 REF='refs/heads/main'
@@ -27,28 +28,29 @@ def validate_host_context(environment=None, event=None):
            'GITHUB_REPOSITORY':REPOSITORY,'GITHUB_REF':REF,'GITHUB_WORKFLOW_REF':WORKFLOW,
            'RUNNER_ENVIRONMENT':'github-hosted','RUNNER_OS':'Linux','RUNNER_ARCH':'X64',
            'ImageOS':'ubuntu24','EC016_GITHUB_DISPOSABLE':ACK}
-    if any(e.get(k)!=v for k,v in fixed.items()):raise RuntimeError('Hosted manual workflow context required')
+    if any(e.get(k)!=v for k,v in fixed.items()):fail('CONTEXT','HOSTED_CONTEXT')
     if any(e.get(k) for k in ('DOCKER_HOST','DOCKER_CONTEXT','DOCKER_TLS_VERIFY','DOCKER_CERT_PATH')):
-        raise RuntimeError('Docker endpoint override forbidden')
+        fail('CONTEXT','ENDPOINT_OVERRIDE')
     if any(k.upper().startswith(('SUPABASE_','PG')) or k.upper() in ('DATABASE_URL','PGRST_DB_URI') for k in e):
-        raise RuntimeError('Connection environment forbidden')
+        fail('CONTEXT','CONNECTION_OVERRIDE')
     for k in ('GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT'):
-        if not re.fullmatch('[1-9][0-9]*',e.get(k,'')):raise RuntimeError('Invalid workflow identity')
-    if e.get('GITHUB_RUN_ATTEMPT')!='1':raise RuntimeError('Use a fresh manual dispatch, not a replayed authorization')
-    if not re.fullmatch('[a-f0-9]{40}',e.get('GITHUB_SHA','')):raise RuntimeError('Invalid source revision')
-    if e.get('GITHUB_WORKSPACE')!='/home/runner/work/EDD/EDD':raise RuntimeError('Unexpected workspace')
+        if not re.fullmatch('[1-9][0-9]*',e.get(k,'')):fail('CONTEXT','RUN_IDENTITY')
+    if e.get('GITHUB_RUN_ATTEMPT')!='1':fail('CONTEXT','REPLAY_DENIED')
+    if not re.fullmatch('[a-f0-9]{40}',e.get('GITHUB_SHA','')):fail('CONTEXT','WORKFLOW_SHA')
+    if e.get('GITHUB_WORKSPACE')!='/home/runner/work/EDD/EDD':fail('CONTEXT','WORKSPACE')
     if e.get('RUNNER_TEMP')!='/home/runner/work/_temp':
-        raise RuntimeError('Unexpected ephemeral storage')
-    if event is None:event=json.loads(Path(e['GITHUB_EVENT_PATH']).read_text())
+        fail('CONTEXT','TEMP_STORAGE')
+    if event is None:
+        event=operation('EVENT_READ',lambda:json.loads(Path(e['GITHUB_EVENT_PATH']).read_text()))
     repo=event.get('repository',{})
     if (repo.get('full_name')!=REPOSITORY or repo.get('private') is not False
             or event.get('inputs',{}).get('lab_sha')!=e.get('EC016_SOURCE_SHA')
             or event.get('inputs',{}).get('confirmation')!=ACK+':'+e.get('EC016_SOURCE_SHA','')):
-        raise RuntimeError('Public repository and explicit manual acknowledgement required')
+        fail('CONTEXT','MANUAL_EVENT')
     source=e.get('EC016_SOURCE_SHA','')
     if (not re.fullmatch('[a-f0-9]{40}',source) or source!=e.get('EC016_APPROVED_SHA')
             or e.get('EC016_MANUAL_CONFIRMATION')!=ACK+':'+source):
-        raise RuntimeError('Exact reviewed source SHA and explicit single-operator authorization required')
+        fail('CONTEXT','AUTHORIZED_SHA')
     return {'provider':'github-hosted','repository':REPOSITORY,'workflow_ref':WORKFLOW,
             'run_id':e['GITHUB_RUN_ID'],'run_attempt':e['GITHUB_RUN_ATTEMPT'],
             'workspace':e['GITHUB_WORKSPACE'],'workflow_sha':e['GITHUB_SHA'],'source_sha':source}
@@ -57,16 +59,16 @@ def validate_host_context(environment=None, event=None):
 def validate_context_binding(binding):
     expected=validate_host_context()
     if {k:binding.get(k) for k in expected}!=expected or set(binding)!=set(expected)|{'engine_id'}:
-        raise RuntimeError('Cross-job context rejected')
+        fail('CONTEXT','CONTEXT_BINDING')
     if not isinstance(binding.get('engine_id'),str) or not re.fullmatch('[A-Za-z0-9:-]{12,128}',binding['engine_id']):
-        raise RuntimeError('Invalid hosted engine identity')
+        fail('ENGINE','ENGINE_ID')
     return binding
 
 
 def runtime_approval(manifest):
-    if not isinstance(manifest.get('github_context'),dict):raise RuntimeError('Hosted execution binding required')
+    if not isinstance(manifest.get('github_context'),dict):fail('CONTEXT','BINDING_MISSING')
     context=validate_context_binding(manifest['github_context'])
-    if manifest.get('engine_id')!=context['engine_id']:raise RuntimeError('Cross-engine binding rejected')
+    if manifest.get('engine_id')!=context['engine_id']:fail('ENGINE','ENGINE_BINDING')
     return {'engine_id':context['engine_id'],'nonproduction_reviewed':True,'socket':SOCKET}
 
 
@@ -79,14 +81,14 @@ def _command(args, timeout=900):
 def inspect_fresh_engine(config_dir):
     validate_host_context()  # Must precede EVERY invocation of this bootstrap path.
     prefix=['docker','--host',SOCKET,'--config',str(config_dir)]
-    data=json.loads(_command(prefix+['info','--format','{{json .}}']))
+    data=json.loads(operation('ENGINE_INFO',_command,prefix+['info','--format','{{json .}}']))
     if data.get('OSType')!='linux' or data.get('Architecture') not in ('x86_64','amd64'):
-        raise RuntimeError('Linux amd64 daemon required')
+        fail('ENGINE','ENGINE_PLATFORM')
     for command in (['container','ls','-aq'],['volume','ls','-q'],
                     ['network','ls','-q','--filter','type=custom']):
-        if _command(prefix+command).strip():raise RuntimeError('Fresh job daemon required; never remove foreign resources')
-    version=_command(prefix+['compose','version','--short']).strip()
-    if not re.fullmatch(r'v?2\.[0-9]+\.[0-9]+(?:[-+].*)?',version):raise RuntimeError('Reviewed Compose v2 required')
+        if operation('ENGINE_INVENTORY',_command,prefix+command).strip():fail('ENGINE','ENGINE_NOT_EMPTY')
+    version=operation('COMPOSE_QUERY',_command,prefix+['compose','version','--short']).strip()
+    if not re.fullmatch(r'v?2\.[0-9]+\.[0-9]+(?:[-+].*)?',version):fail('ENGINE','COMPOSE_VERSION')
     binding=validate_host_context();binding['engine_id']=data['ID'];validate_context_binding(binding)
     return binding
 
@@ -154,66 +156,84 @@ def compose(state, manifest, *args):
 
 
 def run_lab(parent):
-    validate_host_context()
-    if _command(['git','rev-parse','HEAD']).strip()!=os.environ['EC016_SOURCE_SHA']:
-        raise RuntimeError('Checkout does not match authorized source')
-    os_release=Path('/etc/os-release').read_text()
-    if 'ID=ubuntu\n' not in os_release or 'VERSION_ID="24.04"' not in os_release:
-        raise RuntimeError('Ubuntu 24.04 VM required')
-    # A fresh private Docker config prevents inheritance of registry credentials.
-    config=parent/'docker-config';config.mkdir(mode=0o700)
-    binding=inspect_fresh_engine(config)
-    state=labctl.prepare(parent/'runs',execution_context=binding)
-    _,manifest,expected=labctl.load(state)
+    with stage('CONTEXT'):
+        validate_host_context()
+        if operation('CHECKOUT_COMMAND',_command,['git','rev-parse','HEAD']).strip()!=os.environ['EC016_SOURCE_SHA']:
+            fail('CONTEXT','CHECKOUT_MISMATCH')
+        os_release=operation('HOST_OS_READ',Path('/etc/os-release').read_text)
+        if 'ID=ubuntu\n' not in os_release or 'VERSION_ID="24.04"' not in os_release:
+            fail('CONTEXT','HOST_OS')
+        config=parent/'docker-config'
+        operation('STATE_STORAGE',config.mkdir,mode=0o700)
+    with stage('ENGINE'):
+        binding=inspect_fresh_engine(config)
+    with stage('PREFLIGHT'):
+        state=labctl.prepare(parent/'runs',execution_context=binding)
+        _,manifest,expected=labctl.load(state)
     attested=False
+    primary_error=None
     try:
-        labctl.preflight(state)
-        refs=policy.verify_images(labctl.ROOT)
-        for reference in refs.values():labctl.docker(state,manifest,['pull','--platform','linux/amd64',reference])
-        compose(state,manifest,'build','ec016-tests')
-        from .security_gate import scan_before_bootstrap
-        scan_before_bootstrap(state,manifest,expected)
-        compose(state,manifest,'create','--no-build','--pull','never')
-        configure_network_guard(state,manifest)
-        labctl.attest(state);attested=True
-        from .security_gate import verify_clearance
-        verify_clearance(state,manifest)
-        require_network_guard(state,manifest)
-        containers,networks,volumes=labctl.inventory(state,manifest)
-        policy.owned_resources(manifest,containers,networks,volumes)
-        if any(c.get('State',{}).get('Running') for c in containers):raise RuntimeError('Unexpected running service')
-        by_role={c['Config']['Labels']['com.docker.compose.service']:c['Id'] for c in containers}
-        labctl.docker(state,manifest,['container','start',by_role['ec016-db']])
-        # Start API only after DB health; a bootstrap failure cannot be hidden by retries.
-        deadline=time.monotonic()+120
-        while time.monotonic()<deadline:
-            db=json.loads(labctl.docker(state,manifest,['container','inspect',by_role['ec016-db']]))[0]
-            if not db['State'].get('Running'):raise RuntimeError('Synthetic bootstrap failed')
-            if db['State'].get('Health',{}).get('Status')=='healthy':break
-            time.sleep(1)
-        else:raise RuntimeError('Synthetic database readiness timeout')
-        labctl.docker(state,manifest,['container','start',by_role['ec016-api']])
-        labctl.docker(state,manifest,['container','start',by_role['ec016-tests']])
-        # Bounded wait. Do not stream arbitrary container logs into a public job.
-        deadline=time.monotonic()+360
-        while time.monotonic()<deadline:
-            test=json.loads(labctl.docker(state,manifest,['container','inspect',by_role['ec016-tests']]))[0]
-            if not test['State'].get('Running'):
-                suite_exit=test['State'].get('ExitCode')
-                break
-            time.sleep(1)
-        else:raise RuntimeError('Integration suite timeout')
-        report_text=labctl.docker(state,manifest,['container','logs',by_role['ec016-tests']]).strip()
-        report=json.loads(report_text)
-        validate_report_structure(report)
-        print(json.dumps(report,sort_keys=True))
-        validate_report(report)
-        if suite_exit!=0:raise RuntimeError('Integration suite failed; raw logs withheld')
+        with stage('PREFLIGHT'):
+            labctl.preflight(state)
+        with stage('SCAN'):
+            refs=policy.verify_images(labctl.ROOT)
+            for reference in refs.values():
+                operation('IMAGE_PULL',labctl.docker,state,manifest,['pull','--platform','linux/amd64',reference])
+            operation('IMAGE_BUILD',compose,state,manifest,'build','ec016-tests')
+            from .security_gate import scan_before_bootstrap
+            scan_before_bootstrap(state,manifest,expected)
+        with stage('PREFLIGHT'):
+            operation('COMPOSE_CREATE',compose,state,manifest,'create','--no-build','--pull','never')
+        with stage('NETWORK'):
+            operation('NETWORK_GUARD',configure_network_guard,state,manifest)
+            operation('ATTESTATION',labctl.attest,state);attested=True
+            from .security_gate import verify_clearance
+            operation('SECURITY_BINDING',verify_clearance,state,manifest)
+            operation('NETWORK_GUARD',require_network_guard,state,manifest)
+            containers,networks,volumes=labctl.inventory(state,manifest)
+            policy.owned_resources(manifest,containers,networks,volumes)
+            if any(c.get('State',{}).get('Running') for c in containers):
+                fail('NETWORK','SERVICE_INVENTORY')
+            by_role={c['Config']['Labels']['com.docker.compose.service']:c['Id'] for c in containers}
+        with stage('BOOTSTRAP'):
+            labctl.docker(state,manifest,['container','start',by_role['ec016-db']])
+            deadline=time.monotonic()+120
+            while time.monotonic()<deadline:
+                db=json.loads(labctl.docker(state,manifest,['container','inspect',by_role['ec016-db']]))[0]
+                if not db['State'].get('Running'):fail('BOOTSTRAP','BOOTSTRAP_STOPPED')
+                if db['State'].get('Health',{}).get('Status')=='healthy':break
+                time.sleep(1)
+            else:fail('BOOTSTRAP','BOOTSTRAP_TIMEOUT')
+            labctl.docker(state,manifest,['container','start',by_role['ec016-api']])
+        with stage('INTEGRATION'):
+            labctl.docker(state,manifest,['container','start',by_role['ec016-tests']])
+            deadline=time.monotonic()+360
+            while time.monotonic()<deadline:
+                test=json.loads(labctl.docker(state,manifest,['container','inspect',by_role['ec016-tests']]))[0]
+                if not test['State'].get('Running'):
+                    suite_exit=test['State'].get('ExitCode')
+                    break
+                time.sleep(1)
+            else:fail('INTEGRATION','INTEGRATION_TIMEOUT')
+            report_text=labctl.docker(state,manifest,['container','logs',by_role['ec016-tests']]).strip()
+            report=json.loads(report_text)
+            operation('INTEGRATION_REPORT',validate_report_structure,report)
+            print(json.dumps(report,sort_keys=True))
+            operation('INTEGRATION_REPORT',validate_report,report)
+            if suite_exit!=0:fail('INTEGRATION','INTEGRATION_EXIT')
+    except Exception as error:
+        primary_error=error
+        raise
     finally:
         if attested:
-            labctl.cleanup(state,authorized=True)
-        # Partial resources and firewall rules are left to disposal of this job VM.
-        # No down, prune, volume removal, broad kill or shared firewall cleanup.
+            try:
+                with stage('CLEANUP'):
+                    operation('CLEANUP_FAILED',labctl.cleanup,state,authorized=True)
+            except Failure as cleanup_error:
+                if primary_error is None:raise
+                emit(cleanup_error.stage,cleanup_error.code,'FAILED')
+        # Never mask the primary failure with cleanup failure. Partial resources
+        # and rules still disappear with the disposable GitHub job VM.
 
 
 def validate_report_structure(report):
@@ -233,11 +253,14 @@ def validate_report(report):
 
 def main():
     try:
-        validate_host_context()  # Fail before creating state or contacting any daemon.
+        with stage('CONTEXT'):
+            validate_host_context()  # Before filesystem state or any daemon contact.
         with tempfile.TemporaryDirectory(prefix='ec016-',dir=os.environ['RUNNER_TEMP']) as directory:
             run_lab(Path(directory))
-    except Exception:
-        print('EC016_FAILED: guard, infrastructure or integration failed; raw diagnostics withheld.')
+    except Exception as error:
+        failure=classify('CONTEXT',error)
+        emit(failure.stage,failure.code,'FAILED')
+        print('EC016_FAILED: fixed diagnostics above; raw diagnostics withheld.',flush=True)
         raise SystemExit(1) from None
 
 
