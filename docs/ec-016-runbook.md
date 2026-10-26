@@ -355,3 +355,60 @@ validación: antes se ejecutaron por error los diez tests SQLite en memoria de
 la suite general en ambas versiones, pese a la restricción. No hubo PostgreSQL,
 servicios externos ni datos productivos. La selección final fue corregida.
 El commit solicita omitir CI automático ([skip ci]); no se despacha Actions.
+
+
+## Correctivo exclusivo SCAN tras la tercera ejecución
+
+Evidencia del usuario para 852cd237: CONTEXT/ENGINE/PREFLIGHT OK; SCAN falla con
+COMMAND_FAILED antes de INTEGRATION. La descarga de imágenes del laboratorio y
+su build ya están envueltos como IMAGE_PULL e IMAGE_BUILD. Por el código publicado,
+COMMAND_FAILED proviene de una llamada sin subcódigo en security_gate.py: pull del
+escáner, descarga de su DB, inspección/exportación o invocación de escaneo (incluida
+la comprobación de engine que realiza labctl.docker antes de cada comando).
+La API de logs sigue en 403: **no se identifica cuál falló ni se inventa la causa**.
+
+Se agregan START/OK/FAILED con vocabulario fijo por operación:
+SCAN_SCANNER_PULL, SCAN_DB_DOWNLOAD, SCAN_DB_VALIDATE, SCAN_IMAGE_INSPECT,
+SCAN_IMAGE_EXPORT, SCAN_IMAGE_RUN, SCAN_REPORT_READ, SCAN_REPORT_CHECK y
+SCAN_PROOF_WRITE. subject distingue VULN_DATABASE, POSTGRES, POSTGREST,
+LAB_RUNNER, PYTHON_BASE y SCANNER. reason sólo permite categorías constantes:
+COMMAND_FAILED, COMMAND_TIMEOUT, PERMISSION_DENIED, READ_ONLY_FS, CLI_OPTION,
+REGISTRY_AUTH, RATE_LIMIT, NETWORK, TLS, KILLED_137 o errores de lectura/validación.
+137 no se declara OOM: es únicamente el código de salida observado. No se imprimen
+excepciones, comandos, versiones del entorno, rutas, credenciales ni stdout/stderr.
+Estos dos últimos se examinan sólo internamente para elegir una categoría fija.
+
+Investigación sin daemon/SQL: el manifiesto amd64 y config del escáner fijado
+confirman ENTRYPOINT trivy y arquitectura amd64. Se descargó únicamente la capa
+que contiene el binario, verificando su digest:
+sha256:7b08753d422d07e95ad46e63ad777e7035e6e553bbbba866487f014068015c09.
+El binario extraído es ELF amd64 estático, SHA256
+8266084a71d2e6a2333bc2c69b91c93c26dee9ef39ac2587ace2df54cc9b746b.
+No se instaló ni ejecutó Docker ni se arrancaron contenedores. El intento de ayuda
+con sandbox local sin red no terminó correctamente: no acredita compatibilidad CLI.
+Los nombres de flags usados existen literalmente en ese binario, lo que **no**
+prueba que sean aceptados por su parser. No se elimina un flag por esa suposición.
+
+El UID:GID pasado al escáner coincide con el proceso que crea cache/input/output;
+las pruebas nativas comprueban lectura de input y escritura de cache del mismo UID.
+No prueban mapeos userns ni mounts del runner GitHub. El acceso a GHCR/DB y esos
+montajes no se han reproducido realmente; se distinguirán por operación/motivo.
+
+No cambian flags, referencias/digests, DB pública, frescura, UID/GID, permisos,
+montajes, red, umbrales CVE ni condiciones de security.ok. No se toca Compose.
+Regresiones inyectan el fallo en cada comando antes indistinguible; comprueban
+que no exista security.ok tras fallar y que cinco imágenes deban completar la
+revisión antes de autorizar bootstrap. Un hallazgo crítico sigue bloqueando.
+
+Siguiente acción: responsable autorizado selecciona el SHA correctivo completo,
+actualiza EC016_APPROVED_SHA y hace un despacho manual nuevo desde main con
+lab_sha y confirmation exactos. No usar Re-run jobs. Si falla, basta el registro
+FAILED con code/subject/reason; no publicar logs crudos ni ejecutar sin escaneo.
+
+
+Validación de este correctivo SCAN: **197 pruebas sin SQL aprobadas, 0 fallidas,
+en Python 3.10.22 y Python 3.12.14**, usando check_local con bloqueo de SQLite y
+red externa. Incluye nueve regresiones nuevas. La comparación AST confirma que
+scanner_reference, validate_database, review_report, sandbox_args y verify_clearance
+conservan exactamente su lógica. El único cambio de ejecución es diagnóstico por
+operación; no se afirma haber corregido la causa todavía desconocida del run #3.

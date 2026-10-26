@@ -9,8 +9,10 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 from . import labctl
 from .runner import policy
+from .diagnostics import Failure, classify, emit, validate_public
 
 MAX_DB_AGE_HOURS=72
 
@@ -87,49 +89,111 @@ def sandbox_args(manifest, purpose, cache):
     return args
 
 
+def command_reason(error):
+    """Classify captured errors internally; never return text, paths or arguments."""
+    if isinstance(error,subprocess.TimeoutExpired):return 'COMMAND_TIMEOUT'
+    if isinstance(error,subprocess.CalledProcessError):
+        if error.returncode==137:return 'KILLED_137'  # Could be a signal, not proof of OOM.
+        text=' '.join(value.lower() for value in (error.stderr,error.stdout) if isinstance(value,str))
+        for marker,reason in (('permission denied','PERMISSION_DENIED'),
+                              ('read-only file system','READ_ONLY_FS'),
+                              ('unknown flag','CLI_OPTION'),('flag provided but not defined','CLI_OPTION'),
+                              ('toomanyrequests','RATE_LIMIT'),('too many requests','RATE_LIMIT'),
+                              ('unauthorized','REGISTRY_AUTH'),('authentication required','REGISTRY_AUTH'),
+                              ('no such host','NETWORK'),('connection refused','NETWORK'),
+                              ('network is unreachable','NETWORK'),('i/o timeout','NETWORK'),
+                              ('x509:','TLS'),('tls handshake timeout','TLS')):
+            if marker in text:return reason
+        return 'COMMAND_FAILED'
+    if isinstance(error,json.JSONDecodeError):return 'INVALID_JSON'
+    if isinstance(error,FileNotFoundError):return 'REQUIRED_FILE'
+    return 'CHECK_FAILED'
+
+
+def scan_operation(code,subject,function,*args,**kwargs):
+    validate_public('SCAN',code,subject)
+    emit('SCAN',code,'START',subject=subject)
+    try:result=function(*args,**kwargs)
+    except Failure:raise
+    except Exception as error:
+        known=classify('SCAN',error)
+        if known.code in ('SCAN_REJECTED','SCAN_DATABASE','SCAN_INVENTORY'):
+            raise Failure('SCAN',known.code,subject=subject) from None
+        raise Failure('SCAN',code,subject=subject,reason=command_reason(error)) from None
+    emit('SCAN',code,'OK',subject=subject)
+    return result
+
+
+def read_database(cache):
+    metadata=json.loads((cache/'db/metadata.json').read_text())
+    validate_database(metadata)
+    return metadata
+
+
+def read_image(state,manifest,reference):
+    image=json.loads(labctl.docker(state,manifest,['image','inspect',reference]))[0]
+    if not re.fullmatch('sha256:[a-f0-9]{64}',image.get('Id','')):
+        raise RuntimeError('Unversioned image content')
+    return image['Id']
+
+
+def read_report(path,image_id):
+    report=json.loads(path.read_text())
+    if report.get('Metadata',{}).get('ImageID')!=image_id:
+        raise RuntimeError('Scan belongs to a different image')
+    return report
+
+
+def write_proof(state,manifest,proof):
+    for name,content in [('security.json',json.dumps(proof)),
+                         ('security.ok',manifest['run_id']+':'+manifest['owner_token'])]:
+        path=state/'metadata'/name;path.write_text(content+'\n');path.chmod(0o444)
+
+
 def scan_before_bootstrap(state, manifest, config):
     from .github_runner import runtime_approval
     runtime_approval(manifest)
     scanner=scanner_reference()
-    labctl.docker(state,manifest,['pull','--platform','linux/amd64',scanner])
+    scan_operation('SCAN_SCANNER_PULL','SCANNER',labctl.docker,state,manifest,
+                   ['pull','--platform','linux/amd64',scanner])
     root=state/'security';root.mkdir(mode=0o700)
     cache=root/'cache';cache.mkdir(mode=0o700)
     args=sandbox_args(manifest,'db',cache)+['--network','bridge',scanner,'image',
         '--cache-dir','/cache','--download-db-only','--no-progress',
         '--db-repository','ghcr.io/aquasecurity/trivy-db:2']
-    labctl.docker(state,manifest,args)
-    metadata=json.loads((cache/'db/metadata.json').read_text());validate_database(metadata)
+    scan_operation('SCAN_DB_DOWNLOAD','VULN_DATABASE',labctl.docker,state,manifest,args)
+    metadata=scan_operation('SCAN_DB_VALIDATE','VULN_DATABASE',read_database,cache)
     targets={name:service['image'] for name,service in config['services'].items()}
     targets['python-base']=policy.verify_images(labctl.ROOT)['python'];targets['security-scanner']=scanner
     reviewed={}
+    subjects={'ec016-db':'POSTGRES','ec016-api':'POSTGREST','ec016-tests':'LAB_RUNNER',
+              'python-base':'PYTHON_BASE','security-scanner':'SCANNER'}
     for index,(name,reference) in enumerate(targets.items()):
-        image=json.loads(labctl.docker(state,manifest,['image','inspect',reference]))[0]
-        image_id=image['Id']
-        if not re.fullmatch('sha256:[a-f0-9]{64}',image_id):raise RuntimeError('Unversioned image content')
+        subject=subjects[name]
+        image_id=scan_operation('SCAN_IMAGE_INSPECT',subject,read_image,state,manifest,reference)
         folder=root/name;folder.mkdir(mode=0o700)
         source=folder/'input';source.mkdir(mode=0o700)
         output=folder/'output';output.mkdir(mode=0o700)
         archive=source/'image.tar'
-        labctl.docker(state,manifest,['image','save','--output',str(archive),reference])
+        scan_operation('SCAN_IMAGE_EXPORT',subject,labctl.docker,state,manifest,
+                       ['image','save','--output',str(archive),reference])
         args=sandbox_args(manifest,str(index),cache)+['--network','none',
             '--mount','type=bind,src='+str(archive)+',dst=/input/image.tar,readonly',
             '--mount','type=bind,src='+str(output)+',dst=/output',scanner,'image',
             '--cache-dir','/cache','--input','/input/image.tar','--skip-db-update',
             '--skip-java-db-update','--offline-scan','--scanners','vuln','--list-all-pkgs',
             '--format','json','--output','/output/report.json','--quiet']
-        labctl.docker(state,manifest,args)
-        report=json.loads((output/'report.json').read_text())
-        if report.get('Metadata',{}).get('ImageID')!=image_id:
-            raise RuntimeError('Scan belongs to a different image')
-        reviewed[name]={'image_id':image_id,'counts':review_report(report,allow_inventory_gap=(name=='ec016-api' and reference==policy.verify_images(labctl.ROOT)['postgrest'])),
+        scan_operation('SCAN_IMAGE_RUN',subject,labctl.docker,state,manifest,args)
+        report=scan_operation('SCAN_REPORT_READ',subject,read_report,output/'report.json',image_id)
+        counts=scan_operation('SCAN_REPORT_CHECK',subject,review_report,report,
+                allow_inventory_gap=(name=='ec016-api' and reference==policy.verify_images(labctl.ROOT)['postgrest']))
+        reviewed[name]={'image_id':image_id,'counts':counts,
                         'report_sha256':hashlib.sha256((output/'report.json').read_bytes()).hexdigest()}
         archive.unlink()  # Own newly generated archive only, never an image or foreign volume.
     proof={'run_id':manifest['run_id'],'owner_token':manifest['owner_token'],
            'engine_id':manifest['engine_id'],'source_sha':manifest['github_context']['source_sha'],
            'database_updated_at':metadata['UpdatedAt'],'scanner':scanner,'images':reviewed}
-    for name,content in [('security.json',json.dumps(proof)),
-                         ('security.ok',manifest['run_id']+':'+manifest['owner_token'])]:
-        path=state/'metadata'/name;path.write_text(content+'\n');path.chmod(0o444)
+    scan_operation('SCAN_PROOF_WRITE','LAB_RUNNER',write_proof,state,manifest,proof)
     print(json.dumps({'ec016_security':{name:data['counts'] for name,data in reviewed.items()}},sort_keys=True))
     return proof
 

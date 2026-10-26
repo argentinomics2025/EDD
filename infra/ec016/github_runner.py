@@ -259,7 +259,7 @@ def main():
             run_lab(Path(directory))
     except Exception as error:
         failure=classify('CONTEXT',error)
-        emit(failure.stage,failure.code,'FAILED')
+        emit(failure.stage,failure.code,'FAILED',subject=failure.subject,reason=failure.reason)
         print('EC016_FAILED: fixed diagnostics above; raw diagnostics withheld.',flush=True)
         raise SystemExit(1) from None
 
