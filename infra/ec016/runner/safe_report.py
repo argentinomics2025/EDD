@@ -1,5 +1,6 @@
 """Emit only aggregate unittest results, never exception strings or credentials."""
 import io
+import importlib
 import json
 import unittest
 from .startup import code_from_exception
@@ -20,7 +21,24 @@ def run_suite(suite):
     return report
 
 
+def check_dependencies():
+    for name,code in [('psycopg','SETUP_POSTGRES_IMPORT'),
+                      ('httpx','SETUP_HTTPX_IMPORT'),('postgrest','SETUP_POSTGREST_IMPORT')]:
+        try:
+            module=importlib.import_module(name)
+            if name=='psycopg' and module.pq.__impl__!='binary':
+                return code  # Test lock explicitly requires the bundled binary wheel.
+        except Exception:
+            return code
+    return None
+
+
 def main():
+    code=check_dependencies()
+    if code:
+        print(json.dumps({'tests_run':0,'failures':0,'errors':1,'skipped':0,
+                          'successful':False,'startup_code':code},sort_keys=True))
+        raise SystemExit(1)
     from .integration_suite import DisposableIntegration
     suite=unittest.defaultTestLoader.loadTestsFromTestCase(DisposableIntegration)
     report=run_suite(suite)

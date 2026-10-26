@@ -158,7 +158,8 @@ def test_container():
     inspect_owned(context['postgrest_id'],context['docker_network'],os.environ['EC016_POSTGREST_IMAGE'])
     args=['run','--rm','--network',context['docker_network'],'--read-only','--cap-drop','ALL',
           '--security-opt','no-new-privileges:true','--user','10001:10001',
-          '--tmpfs','/tmp:rw,nosuid,nodev,size=512m,mode=1777','--memory','768m',
+          '--tmpfs','/tmp:rw,noexec,nosuid,nodev,size=512m,mode=1777',
+          '--tmpfs','/tmp/deps:rw,exec,nosuid,nodev,size=256m,mode=1777','--memory','768m',
           '--mount','type=bind,src='+str(ROOT)+',dst=/lab/infra/ec016,readonly',
           '--mount','type=bind,src='+str(state)+',dst=/run/ec016,readonly',
           '--workdir','/lab','--env','PYTHONDONTWRITEBYTECODE=1','--env','PYTHONPATH=/tmp/deps:/lab',
