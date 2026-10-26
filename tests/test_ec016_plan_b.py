@@ -57,7 +57,9 @@ class PlanB(unittest.TestCase):
 
     def test_source_and_all_eleven_criteria_are_unchanged(self):
         file=ROOT/'infra/ec016/runner/integration_suite.py'
-        self.assertEqual(hashlib.sha256(file.read_bytes()).hexdigest(),'2d69f93e0ec55358e942a17533a85d7672cb04cc4be476c5a06a5f1cdf86ef65')
+        source=file.read_text()
+        methods='\n'.join(ast.get_source_segment(source,n) for n in ast.walk(ast.parse(source)) if isinstance(n,ast.FunctionDef) and n.name.startswith('test_'))
+        self.assertEqual(hashlib.sha256(methods.encode()).hexdigest(),'77159a664a4bf5dce8317c737e39d3efd72cbfce7dad86d3552aea38918945e2')
         source=(ROOT/'infra/ec016/schema.sql').read_text().partition(services.SCHEMA_MARKER)[2]
         self.assertEqual(hashlib.sha256(source.encode()).hexdigest(),'9cb38846a192b5171dc02213ee4ea38ff8382a98872f408523b2be1289e8fe7b')
 

@@ -9,6 +9,7 @@ import unittest
 
 from .lab_guard import (TABLES, MARKER, runtime_context, admin_connection, api_client)
 from . import policy
+from .startup import StartupError
 
 KEYS={'datos_comex':'fecha','socios_comerciales':'fecha_informe,pais',
       'comex_rubros':'fecha_informe,tipo_flujo,rubro_principal,subrubro'}
@@ -35,23 +36,41 @@ def insert(client,table,rows):
 class DisposableIntegration(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        manifest=runtime_context()
+        try:manifest=runtime_context()
+        except Exception as error:raise StartupError('SETUP_IDENTITY') from error
         last=None
         for attempt in range(30):
+            phase='SETUP_POSTGRES_CONNECTION'
             try:
-                connection=admin_connection();connection.close()
+                connection=admin_connection()
+                phase='SETUP_SESSION_CLOSE'
+                connection.close()
+                phase='SETUP_SDK'
                 client,_=api_client(anonymous=True)
                 try:
-                    rows=client.from_('ec016_metadata').select('*').execute().data
+                    phase='SETUP_METADATA_QUERY'
+                    try:rows=client.from_('ec016_metadata').select('*').execute().data
+                    except Exception as error:
+                        import httpx
+                        if isinstance(error,httpx.TransportError):
+                            raise StartupError('SETUP_POSTGREST_UNAVAILABLE') from error
+                        raise
+                    phase='SETUP_IDENTITY'
                     if len(rows)!=1:raise RuntimeError('Wrong API identity')
                     policy.validate_marker_payload({'scope':rows[0]['value'],'run_id':rows[0]['run_id'],
                                                    'owner_token':rows[0]['owner_token']},manifest)
-                finally:client.session.close()
+                finally:
+                    # Preserve the first error if cleanup also fails.
+                    import sys
+                    failed=sys.exc_info()[0] is not None
+                    try:client.session.close()
+                    except Exception as error:
+                        if not failed:raise StartupError('SETUP_SESSION_CLOSE') from error
                 return
             except Exception as exc:
-                last=exc
+                last=exc if isinstance(exc,StartupError) else StartupError(phase)
                 time.sleep(1)
-        raise RuntimeError('Disposable services did not become ready') from last
+        raise last from None
 
     def setUp(self):
         self.admin=admin_connection();self.addCleanup(self.admin.close)

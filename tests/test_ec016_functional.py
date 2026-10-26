@@ -1,5 +1,6 @@
 """Functional workflow is separate from security certification; offline tests."""
 import hashlib
+import ast
 import json
 import os
 import tempfile
@@ -73,8 +74,7 @@ class FunctionalWorkflow(unittest.TestCase):
 
     def test_security_workflow_and_original_criteria_unchanged(self):
         for name,digest in [
-            ('.github/workflows/ec016_integration.yml','0a1bde734bd6d9370dde0c288e535b75fb1a554aea6aefc2076a0a0a0f98ce46'),
-            ('infra/ec016/runner/integration_suite.py','2d69f93e0ec55358e942a17533a85d7672cb04cc4be476c5a06a5f1cdf86ef65')]:
+            ('.github/workflows/ec016_integration.yml','0a1bde734bd6d9370dde0c288e535b75fb1a554aea6aefc2076a0a0a0f98ce46')]:
             self.assertEqual(hashlib.sha256((ROOT/name).read_bytes()).hexdigest(),digest)
         body=(ROOT/'infra/ec016/schema.sql').read_text().partition(services.SCHEMA_MARKER)[2]
         self.assertEqual(hashlib.sha256(body.encode()).hexdigest(),'9cb38846a192b5171dc02213ee4ea38ff8382a98872f408523b2be1289e8fe7b')

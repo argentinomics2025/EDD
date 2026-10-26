@@ -239,8 +239,11 @@ def run_lab(parent):
 
 
 def validate_report_structure(report):
-    if not isinstance(report,dict) or set(report)!={'tests_run','failures','errors','skipped','successful'}:
+    from .runner.startup import CODES
+    if not isinstance(report,dict) or set(report)-{'startup_code'}!={'tests_run','failures','errors','skipped','successful'}:
         raise RuntimeError('Unreviewed public report schema')
+    if 'startup_code' in report and (not isinstance(report['startup_code'],str) or report['startup_code'] not in CODES or not report.get('errors')):
+        raise RuntimeError('Invalid startup diagnostic')
     if type(report['successful']) is not bool or any(type(report[k]) is not int or not 0<=report[k]<=11
             for k in ('tests_run','failures','errors','skipped')):
         raise RuntimeError('Unsafe public report fields')

@@ -2,14 +2,21 @@
 import io
 import json
 import unittest
+from .startup import code_from_exception
 
 
 def run_suite(suite):
     # unittest normally writes traceback/SQL/HTTP details. Keep them private in memory.
-    result=unittest.TextTestRunner(stream=io.StringIO(),verbosity=0).run(suite)
+    class SafeResult(unittest.TextTestResult):
+        startup_code=None
+        def addError(self,test,err):
+            self.startup_code=code_from_exception(err[1]) or self.startup_code
+            super().addError(test,err)
+    result=unittest.TextTestRunner(stream=io.StringIO(),verbosity=0,resultclass=SafeResult).run(suite)
     report={'tests_run':result.testsRun,'failures':len(result.failures),
             'errors':len(result.errors),'skipped':len(result.skipped),
             'successful':result.wasSuccessful()}
+    if result.startup_code:report['startup_code']=result.startup_code
     return report
 
 

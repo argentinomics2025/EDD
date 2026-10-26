@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import socket
 from . import policy
+from .startup import StartupError
 
 API_URL = 'http://172.30.216.3:3000'
 DB_HOST = '172.30.216.2'
@@ -113,12 +114,18 @@ def jwt(role='ec016_writer', scope='synthetic'):
 
 
 def admin_connection():
-    manifest=runtime_context()
-    import psycopg
-    connection=psycopg.connect(**db_parameters(),autocommit=True)
+    try:manifest=runtime_context()
+    except Exception as error:raise StartupError('SETUP_IDENTITY') from error
     try:
-        row=connection.execute("SELECT current_database(),current_user,(SELECT jsonb_build_object('scope',value,'run_id',run_id,'owner_token',owner_token) FROM api.ec016_metadata WHERE name='scope')").fetchone()
-        validate_marker(*row,manifest)
+        import psycopg
+        connection=psycopg.connect(**db_parameters(),autocommit=True)
+    except Exception as error:raise StartupError('SETUP_POSTGRES_CONNECTION') from error
+    try:
+        try:
+            row=connection.execute("SELECT current_database(),current_user,(SELECT jsonb_build_object('scope',value,'run_id',run_id,'owner_token',owner_token) FROM api.ec016_metadata WHERE name='scope')").fetchone()
+        except Exception as error:raise StartupError('SETUP_METADATA_QUERY') from error
+        try:validate_marker(*row,manifest)
+        except Exception as error:raise StartupError('SETUP_IDENTITY') from error
     except Exception:
         connection.close()
         raise
