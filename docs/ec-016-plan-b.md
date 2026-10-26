@@ -111,3 +111,43 @@ contenido (no ortografía del nombre de imagen), DNS privado, limpieza de recurs
 ajenos, bloqueo de reportes ausentes/obsoletos/HIGH/CRITICAL, conservación exacta
 de las once pruebas y cuerpo SQL. Actionlint 1.7.7, YAML/JSON, AST Python y Bash
 validados sin ejecutar el workflow. No se inició Docker ni PostgreSQL local.
+
+## Diagnóstico tras el primer escaneo real fallido
+
+La evidencia recibida (PostgreSQL, exit 1) **no demuestra todavía** vulnerabilidades
+ni fallo técnico. Se inspeccionaron la action fijada y `pkg/commands/artifact/run.go`
+de Trivy v0.69.3: `r.Report` escribe el reporte antes de `operation.Exit` cuando
+la ejecución llega a resultados. Por tanto, un exit 1 por HIGH/CRITICAL puede
+conservar JSON; un error de descarga, imagen o escritura puede no producirlo.
+No se dispone aquí del reporte de la ejecución fallida para atribuir su causa.
+Fuente: https://raw.githubusercontent.com/aquasecurity/trivy/v0.69.3/pkg/commands/artifact/run.go
+
+La plantilla ahora asigna IDs a los cuatro scans. Un wrapper llama al mismo
+binario verificado, conserva íntegro su código de salida y captura stdout/stderr
+en archivos temporales privados (0600), sin artefactos ni impresión cruda. El
+JSON sigue en el destino original. Un paso final `always()` tras checkout válido
+examina únicamente scans intentados y emite códigos fijos:
+
+- SCAN_VULNERABILITIES_BLOCKED: cantidades HIGH/CRITICAL y nombres de paquetes
+  filtrados por alfabeto seguro (máximo 50, indicador de truncamiento), sin rutas,
+  targets, versiones, URLs o texto del reporte.
+- SCAN_DB_DOWNLOAD_FAILED / SCAN_IMAGE_ERROR: sólo ante firmas reconocidas del
+  registro privado; un error desconocido no se atribuye a una causa inventada.
+- SCAN_REPORT_MISSING / SCAN_REPORT_INVALID: ausencia, JSON inválido o identidad
+  de imagen incorrecta. Pueden acompañar al código técnico de descarga/imagen.
+- SCAN_TECHNICAL_FAILED: action fallida con reporte válido sin hallazgos bloqueantes
+  y sin firma técnica reconocida. Requiere diagnóstico ulterior, sigue bloqueada.
+
+No hay continue-on-error. Los scans posteriores se omiten al primer fallo; el
+paso final falla si cualquier scan falló, no se intentó, tiene hallazgos o reportes
+inválidos. Sólo cuatro resultados exitosos más el control previo de DB fresca,
+inventarios e identidad permiten success. Integration conserva needs:scan y la
+condición estricta success, sin servicios iniciados antes de superar el gate.
+
+Validación de esta corrección: 219 pruebas sin SQL aprobadas por versión (Python
+3.10.22 y 3.12.14), diez regresiones de diagnóstico; sintaxis Python/YAML/Bash,
+actionlint y diff --check. No se ejecutaron Trivy, Docker, SQL ni workflows.
+Para comprobarlo realmente se requiere autorización del responsable para copiar
+sólo el YAML actualizado al workflow estable, aprobar el SHA experimental y hacer
+un dispatch nuevo. Cambiar únicamente el SHA no añade el paso final al YAML viejo.
+**NO APTO PARA PRODUCCIÓN.**
