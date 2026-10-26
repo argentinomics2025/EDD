@@ -1,0 +1,27 @@
+{
+  "trivy_action": {
+    "ref": "aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8",
+    "url": "https://raw.githubusercontent.com/aquasecurity/trivy-action/b6643a29fecd7f34b3597bc6acb0a98b03d33ff8/action.yaml",
+    "source_sha256": "3e0049b442355f895c40c04f8d380d3fc2c9ad26e9108e0000c3c3178b1d62b3"
+  },
+  "trivy_binary": {
+    "version": "0.69.3",
+    "archive_url": "https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz",
+    "checksums_url": "https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_checksums.txt",
+    "archive_sha256": "1816b632dfe529869c740c0913e36bd1629cb7688bd5634f4a858c1d57c88b75"
+  },
+  "db_defaults": {
+    "url": "https://raw.githubusercontent.com/aquasecurity/trivy/v0.69.3/pkg/flag/db_flags.go",
+    "source_sha256": "6dae27a3924bf98de0024092920efb5b8609fd7b9ad37d78d3563c63dea344e9",
+    "verified": "DBRepositoryFlag defaults to official GCR repository then official GHCR repository"
+  },
+  "postgrest_auth": {
+    "url": "https://raw.githubusercontent.com/PostgREST/postgrest/v12.2.12/src/PostgREST/AppState.hs",
+    "source_sha256": "7af63c30edabf51c411f6f7e21eea2dee4a0cf0e172834fcea4b075ec75480cd",
+    "verified": "password authentication failure kills mainThreadId; start after synthetic authenticator creation"
+  },
+  "setup_disabled": {
+    "reason": "Pinned setup action checks out installer from moving default branch; skip-setup-trivy=true avoids that path."
+  },
+  "verified_at": "2026-10-26T15:29:09.077570+00:00"
+}

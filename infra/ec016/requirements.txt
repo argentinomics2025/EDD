@@ -1,0 +1,4 @@
+# Separate test environment; no change to production requirements.
+psycopg[binary]==3.2.6
+postgrest==0.19.3
+httpx==0.28.1

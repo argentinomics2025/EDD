@@ -1,0 +1,8 @@
+{
+  "status": "resolved_not_installed",
+  "target": "cpython-3.12-linux-amd64",
+  "sha256": "211f3e0f3d093d7b6ea5dd61d80ebd40a32e3e52442bd1e320bcca7906190ede",
+  "input_sha256": "d1eaea190db77672ecb399c405ee1dc1a82aed54b7301d2efb62c7ffd98c51c8",
+  "resolved_at": "2026-10-24T03:20:51.760202+00:00",
+  "command": "uv pip compile requirements.txt --generate-hashes --python-version 3.12 --python-platform x86_64-unknown-linux-gnu --only-binary :all:"
+}

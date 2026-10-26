@@ -1,30 +1,63 @@
-name: 🤖 Bot ICA Rubros (Comex Detalle)
+name: Rubros ICA
 
 on:
-  workflow_dispatch: # EL BOTÓN MÁGICO. Solo manual, porque el script requiere actualización de URL cada mes.
+  workflow_dispatch:
+    inputs:
+      write:
+        description: Aplicar datos validados en Supabase
+        type: boolean
+        default: false
+      reviewed_sha256:
+        description: SHA256 del payload revisado (obligatorio para escribir)
+        type: string
+        required: false
+      period:
+        description: Mes estadístico YYYY-MM
+        type: string
+        required: true
+      excel_url:
+        description: URL HTTPS del XLS oficial del INDEC
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+# Shared across all ICA writers. Do not cancel a running write.
+concurrency:
+  group: ica-supabase-writers
+  cancel-in-progress: false
 
 jobs:
-  actualizar-rubros:
-    name: Procesar Excel INDEC
+  actualizar:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     steps:
-      - name: 📥 Clonar repositorio
-        uses: actions/checkout@v4
-
-      - name: 🐍 Configurar Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      - name: 📦 Instalar dependencias
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests pandas supabase xlrd
-
-      - name: 🚀 Ejecutar Robot de Rubros
+          cache: pip
+          cache-dependency-path: requirements-ica.txt
+      - name: Instalar dependencias ICA
+        run: python -m pip install -r requirements-ica.txt
+      - name: Pruebas aisladas sin secretos
+        run: python -m unittest discover -s tests -v
+      - name: Ejecutar validación o publicación
         env:
-          TZ: 'America/Argentina/Buenos_Aires'
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python scripts/bot_ica_rubros.py
+          REVIEWED_SHA256: ${{ inputs.reviewed_sha256 }}
+          APPLY: ${{ github.event_name == 'workflow_dispatch' && inputs.write }}
+          ICA_PERIOD: ${{ inputs.period }}
+          ICA_EXCEL_URL: ${{ inputs.excel_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ "$APPLY" == "true" ]]; then
+            [[ "$REVIEWED_SHA256" =~ ^[a-f0-9]{64}$ ]] || { echo "Falta SHA256 revisado" >&2; exit 1; }
+            args+=(--write --reviewed-sha256 "$REVIEWED_SHA256")
+          fi
+          args+=(--period "$ICA_PERIOD" --excel-url "$ICA_EXCEL_URL")
+          python scripts/bot_ica_rubros.py "${args[@]}"

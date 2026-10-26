@@ -1,0 +1,489 @@
+{
+  "provenance": {
+    "producer": "Docker Compose CLI 2.40.3 config --format json",
+    "daemon": "unreachable Unix socket explicitly selected; no containers or SQL",
+    "redaction": "Only absolute checkout/temporary metadata prefixes replaced with fixed tokens.",
+    "observed_previous_error": "Unreviewed effective service option",
+    "additional_service_keys": {
+      "ec016-db": [
+        "command"
+      ],
+      "ec016-api": [
+        "command",
+        "entrypoint"
+      ],
+      "ec016-tests": [
+        "entrypoint"
+      ]
+    },
+    "observed_bind_rendering": "create_host_path false omitted, bind object retained",
+    "observed_memory_rendering": "mem_limit emits exact decimal byte counts as JSON strings",
+    "compose_plugin_sha256": "dba9d98e1ba5bfe11d88c99b9bd32fc4a0624a30fafe68eea34d61a3e42fd372"
+  },
+  "expected": {
+    "services": {
+      "ec016-db": {
+        "environment": {
+          "POSTGRES_USER": "ec016_admin",
+          "POSTGRES_PASSWORD": "EC016_SYNTHETIC_ADMIN_ONLY",
+          "POSTGRES_DB": "ec016_disposable",
+          "POSTGRES_INITDB_ARGS": "--encoding=UTF8 --locale=C.UTF-8",
+          "EC016_RUN_ID": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "EC016_CONTAINER_ROLE": "ec016-db"
+        },
+        "tmpfs": [
+          "/var/lib/postgresql/data"
+        ],
+        "volumes": [
+          {
+            "type": "bind",
+            "source": "{EC016_ROOT}/schema.sql",
+            "target": "/opt/ec016/schema.sql",
+            "read_only": true,
+            "bind": {
+              "create_host_path": false
+            }
+          },
+          {
+            "type": "bind",
+            "source": "{EC016_ROOT}/db-entrypoint.sh",
+            "target": "/opt/ec016/db-entrypoint.sh",
+            "read_only": true,
+            "bind": {
+              "create_host_path": false
+            }
+          },
+          {
+            "type": "bind",
+            "source": "{EC016_ROOT}/bootstrap.sh",
+            "target": "/docker-entrypoint-initdb.d/001-ec016.sh",
+            "read_only": true,
+            "bind": {
+              "create_host_path": false
+            }
+          },
+          {
+            "type": "bind",
+            "source": "{EC016_METADATA}",
+            "target": "/run/ec016",
+            "read_only": true,
+            "bind": {
+              "create_host_path": false
+            }
+          }
+        ],
+        "networks": {
+          "isolated": {
+            "ipv4_address": "172.30.216.2"
+          }
+        },
+        "healthcheck": {
+          "test": [
+            "CMD-SHELL",
+            "pg_isready -U ec016_admin -d ec016_disposable"
+          ],
+          "interval": "2s",
+          "timeout": "2s",
+          "retries": 30
+        },
+        "mem_limit": "768m",
+        "platform": "linux/amd64",
+        "entrypoint": [
+          "bash",
+          "/opt/ec016/db-entrypoint.sh"
+        ],
+        "dns": [
+          "127.0.0.1"
+        ],
+        "sysctls": {
+          "net.ipv6.conf.all.disable_ipv6": "1",
+          "net.ipv6.conf.default.disable_ipv6": "1"
+        },
+        "hostname": "ec016-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ec016-db",
+        "labels": {
+          "org.economiacriolla.ec016.scope": "EC016_DISPOSABLE_SYNTHETIC_ONLY",
+          "org.economiacriolla.ec016.run": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "org.economiacriolla.ec016.owner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "org.economiacriolla.ec016.service": "ec016-db"
+        },
+        "image": "docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8"
+      },
+      "ec016-api": {
+        "environment": {
+          "PGRST_DB_URI": "postgres://ec016_authenticator:EC016_SYNTHETIC_AUTH_ONLY@172.30.216.2:5432/ec016_disposable",
+          "PGRST_DB_SCHEMAS": "api",
+          "PGRST_DB_ANON_ROLE": "ec016_reader",
+          "PGRST_JWT_SECRET": "EC016_PUBLIC_SYNTHETIC_JWT_KEY_NOT_A_REAL_SECRET_0123456789",
+          "PGRST_SERVER_PORT": "3000",
+          "EC016_RUN_ID": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "EC016_CONTAINER_ROLE": "ec016-api"
+        },
+        "depends_on": {
+          "ec016-db": {
+            "condition": "service_healthy"
+          }
+        },
+        "networks": {
+          "isolated": {
+            "ipv4_address": "172.30.216.3"
+          }
+        },
+        "read_only": true,
+        "cap_drop": [
+          "ALL"
+        ],
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
+        "mem_limit": "256m",
+        "platform": "linux/amd64",
+        "volumes": [
+          {
+            "type": "bind",
+            "source": "{EC016_METADATA}",
+            "target": "/run/ec016",
+            "read_only": true,
+            "bind": {
+              "create_host_path": false
+            }
+          }
+        ],
+        "dns": [
+          "127.0.0.1"
+        ],
+        "sysctls": {
+          "net.ipv6.conf.all.disable_ipv6": "1",
+          "net.ipv6.conf.default.disable_ipv6": "1"
+        },
+        "hostname": "ec016-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ec016-api",
+        "labels": {
+          "org.economiacriolla.ec016.scope": "EC016_DISPOSABLE_SYNTHETIC_ONLY",
+          "org.economiacriolla.ec016.run": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "org.economiacriolla.ec016.owner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "org.economiacriolla.ec016.service": "ec016-api"
+        },
+        "image": "docker.io/postgrest/postgrest:v12.2.12@sha256:5f4ce744539bbba786b4e24dbbd95bdb2a956dcf568c5374995a0ff4a68f5bd2"
+      },
+      "ec016-tests": {
+        "environment": {
+          "EC016_EXECUTE_DISPOSABLE": "YES_SYNTHETIC_ONLY",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "EC016_RUN_ID": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "EC016_CONTAINER_ROLE": "ec016-tests"
+        },
+        "depends_on": [
+          "ec016-api"
+        ],
+        "networks": {
+          "isolated": {
+            "ipv4_address": "172.30.216.4"
+          }
+        },
+        "read_only": true,
+        "tmpfs": [
+          "/tmp"
+        ],
+        "cap_drop": [
+          "ALL"
+        ],
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
+        "mem_limit": "512m",
+        "platform": "linux/amd64",
+        "volumes": [
+          {
+            "type": "bind",
+            "source": "{EC016_METADATA}",
+            "target": "/run/ec016",
+            "read_only": true,
+            "bind": {
+              "create_host_path": false
+            }
+          }
+        ],
+        "user": "10001:10001",
+        "dns": [
+          "127.0.0.1"
+        ],
+        "sysctls": {
+          "net.ipv6.conf.all.disable_ipv6": "1",
+          "net.ipv6.conf.default.disable_ipv6": "1"
+        },
+        "hostname": "ec016-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ec016-tests",
+        "labels": {
+          "org.economiacriolla.ec016.scope": "EC016_DISPOSABLE_SYNTHETIC_ONLY",
+          "org.economiacriolla.ec016.run": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "org.economiacriolla.ec016.owner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "org.economiacriolla.ec016.service": "ec016-tests"
+        },
+        "command": [
+          "python",
+          "-m",
+          "infra.ec016.runner.safe_report"
+        ],
+        "image": "ec016-runner:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "build": {
+          "context": "{EC016_ROOT}",
+          "dockerfile": "Dockerfile",
+          "args": {
+            "PYTHON_IMAGE": "docker.io/library/python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e"
+          }
+        }
+      }
+    },
+    "networks": {
+      "isolated": {
+        "internal": true,
+        "ipam": {
+          "config": [
+            {
+              "subnet": "172.30.216.0/24",
+              "gateway": "172.30.216.1"
+            }
+          ],
+          "driver": "default"
+        },
+        "driver": "bridge",
+        "name": "ec016-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-isolated",
+        "labels": {
+          "org.economiacriolla.ec016.scope": "EC016_DISPOSABLE_SYNTHETIC_ONLY",
+          "org.economiacriolla.ec016.run": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "org.economiacriolla.ec016.owner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    },
+    "name": "ec016-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "actual": {
+    "name": "ec016-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "networks": {
+      "isolated": {
+        "name": "ec016-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-isolated",
+        "driver": "bridge",
+        "ipam": {
+          "driver": "default",
+          "config": [
+            {
+              "subnet": "172.30.216.0/24",
+              "gateway": "172.30.216.1"
+            }
+          ]
+        },
+        "internal": true,
+        "labels": {
+          "org.economiacriolla.ec016.owner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "org.economiacriolla.ec016.run": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "org.economiacriolla.ec016.scope": "EC016_DISPOSABLE_SYNTHETIC_ONLY"
+        }
+      }
+    },
+    "services": {
+      "ec016-api": {
+        "cap_drop": [
+          "ALL"
+        ],
+        "command": null,
+        "depends_on": {
+          "ec016-db": {
+            "condition": "service_healthy",
+            "required": true
+          }
+        },
+        "dns": [
+          "127.0.0.1"
+        ],
+        "entrypoint": null,
+        "environment": {
+          "EC016_CONTAINER_ROLE": "ec016-api",
+          "EC016_RUN_ID": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "PGRST_DB_ANON_ROLE": "ec016_reader",
+          "PGRST_DB_SCHEMAS": "api",
+          "PGRST_DB_URI": "postgres://ec016_authenticator:EC016_SYNTHETIC_AUTH_ONLY@172.30.216.2:5432/ec016_disposable",
+          "PGRST_JWT_SECRET": "EC016_PUBLIC_SYNTHETIC_JWT_KEY_NOT_A_REAL_SECRET_0123456789",
+          "PGRST_SERVER_PORT": "3000"
+        },
+        "hostname": "ec016-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ec016-api",
+        "image": "docker.io/postgrest/postgrest:v12.2.12@sha256:5f4ce744539bbba786b4e24dbbd95bdb2a956dcf568c5374995a0ff4a68f5bd2",
+        "labels": {
+          "org.economiacriolla.ec016.owner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "org.economiacriolla.ec016.run": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "org.economiacriolla.ec016.scope": "EC016_DISPOSABLE_SYNTHETIC_ONLY",
+          "org.economiacriolla.ec016.service": "ec016-api"
+        },
+        "mem_limit": "268435456",
+        "networks": {
+          "isolated": {
+            "ipv4_address": "172.30.216.3"
+          }
+        },
+        "platform": "linux/amd64",
+        "read_only": true,
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
+        "sysctls": {
+          "net.ipv6.conf.all.disable_ipv6": "1",
+          "net.ipv6.conf.default.disable_ipv6": "1"
+        },
+        "volumes": [
+          {
+            "type": "bind",
+            "source": "{EC016_METADATA}",
+            "target": "/run/ec016",
+            "read_only": true,
+            "bind": {}
+          }
+        ]
+      },
+      "ec016-db": {
+        "command": null,
+        "dns": [
+          "127.0.0.1"
+        ],
+        "entrypoint": [
+          "bash",
+          "/opt/ec016/db-entrypoint.sh"
+        ],
+        "environment": {
+          "EC016_CONTAINER_ROLE": "ec016-db",
+          "EC016_RUN_ID": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "POSTGRES_DB": "ec016_disposable",
+          "POSTGRES_INITDB_ARGS": "--encoding=UTF8 --locale=C.UTF-8",
+          "POSTGRES_PASSWORD": "EC016_SYNTHETIC_ADMIN_ONLY",
+          "POSTGRES_USER": "ec016_admin"
+        },
+        "hostname": "ec016-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ec016-db",
+        "healthcheck": {
+          "test": [
+            "CMD-SHELL",
+            "pg_isready -U ec016_admin -d ec016_disposable"
+          ],
+          "timeout": "2s",
+          "interval": "2s",
+          "retries": 30
+        },
+        "image": "docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8",
+        "labels": {
+          "org.economiacriolla.ec016.owner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "org.economiacriolla.ec016.run": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "org.economiacriolla.ec016.scope": "EC016_DISPOSABLE_SYNTHETIC_ONLY",
+          "org.economiacriolla.ec016.service": "ec016-db"
+        },
+        "mem_limit": "805306368",
+        "networks": {
+          "isolated": {
+            "ipv4_address": "172.30.216.2"
+          }
+        },
+        "platform": "linux/amd64",
+        "sysctls": {
+          "net.ipv6.conf.all.disable_ipv6": "1",
+          "net.ipv6.conf.default.disable_ipv6": "1"
+        },
+        "tmpfs": [
+          "/var/lib/postgresql/data"
+        ],
+        "volumes": [
+          {
+            "type": "bind",
+            "source": "{EC016_ROOT}/schema.sql",
+            "target": "/opt/ec016/schema.sql",
+            "read_only": true,
+            "bind": {}
+          },
+          {
+            "type": "bind",
+            "source": "{EC016_ROOT}/db-entrypoint.sh",
+            "target": "/opt/ec016/db-entrypoint.sh",
+            "read_only": true,
+            "bind": {}
+          },
+          {
+            "type": "bind",
+            "source": "{EC016_ROOT}/bootstrap.sh",
+            "target": "/docker-entrypoint-initdb.d/001-ec016.sh",
+            "read_only": true,
+            "bind": {}
+          },
+          {
+            "type": "bind",
+            "source": "{EC016_METADATA}",
+            "target": "/run/ec016",
+            "read_only": true,
+            "bind": {}
+          }
+        ]
+      },
+      "ec016-tests": {
+        "build": {
+          "context": "{EC016_ROOT}",
+          "dockerfile": "Dockerfile",
+          "args": {
+            "PYTHON_IMAGE": "docker.io/library/python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e"
+          }
+        },
+        "cap_drop": [
+          "ALL"
+        ],
+        "command": [
+          "python",
+          "-m",
+          "infra.ec016.runner.safe_report"
+        ],
+        "depends_on": {
+          "ec016-api": {
+            "condition": "service_started",
+            "required": true
+          }
+        },
+        "dns": [
+          "127.0.0.1"
+        ],
+        "entrypoint": null,
+        "environment": {
+          "EC016_CONTAINER_ROLE": "ec016-tests",
+          "EC016_EXECUTE_DISPOSABLE": "YES_SYNTHETIC_ONLY",
+          "EC016_RUN_ID": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "hostname": "ec016-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ec016-tests",
+        "image": "ec016-runner:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "labels": {
+          "org.economiacriolla.ec016.owner": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "org.economiacriolla.ec016.run": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "org.economiacriolla.ec016.scope": "EC016_DISPOSABLE_SYNTHETIC_ONLY",
+          "org.economiacriolla.ec016.service": "ec016-tests"
+        },
+        "mem_limit": "536870912",
+        "networks": {
+          "isolated": {
+            "ipv4_address": "172.30.216.4"
+          }
+        },
+        "platform": "linux/amd64",
+        "read_only": true,
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
+        "sysctls": {
+          "net.ipv6.conf.all.disable_ipv6": "1",
+          "net.ipv6.conf.default.disable_ipv6": "1"
+        },
+        "tmpfs": [
+          "/tmp"
+        ],
+        "user": "10001:10001",
+        "volumes": [
+          {
+            "type": "bind",
+            "source": "{EC016_METADATA}",
+            "target": "/run/ec016",
+            "read_only": true,
+            "bind": {}
+          }
+        ]
+      }
+    }
+  }
+}

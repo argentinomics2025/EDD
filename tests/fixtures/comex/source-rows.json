@@ -1,0 +1,120 @@
+{
+  "source_file": "intercambio-comercial-argentino-mensual.csv",
+  "source_sha256": "fff1819762f5783d25204e1cc388156b6d803c5a3ef525e3fa0a51a6f494127a",
+  "source_size_bytes": 91553,
+  "derivation": "Exact original CSV field strings; no computed parser outputs; not a complete independent economic oracle",
+  "header": [
+    "indice_tiempo",
+    "ica_expo_totales",
+    "ica_exportacion_productos_primarios",
+    "ica_exportacion_manufacturas_origen_agropecuario",
+    "ica_exportacion_manufacturas_origen_industrial",
+    "ica_exportacion_combustible_energia",
+    "ica_importaciones_totales",
+    "ica_importaciones_bienes_capital",
+    "ica_importaciones_bienes_intermedios",
+    "ica_importaciones_combustibles_lubricantes",
+    "ica_importaciones_piezas_accesorios_bienes_capital",
+    "ica_importaciones_bienes_consumo",
+    "ica_importaciones_vehiculos_automotores_pasajeros",
+    "ica_importaciones_resto",
+    "ica_bienes_capital_partes_piezas",
+    "ica_bienes_intermedios_combustibles_lubricantes",
+    "ica_importaciones_bs_consumo_vehiculos_automotor_pasajeros",
+    "ica_saldo_comercial"
+  ],
+  "selected_source_rows": [
+    {
+      "source_row": 278,
+      "values_as_published": {
+        "indice_tiempo": "2015-01-01",
+        "ica_expo_totales": "3796.0",
+        "ica_exportacion_productos_primarios": "798.4061263487536",
+        "ica_exportacion_manufacturas_origen_agropecuario": "1563.668081233344",
+        "ica_exportacion_manufacturas_origen_industrial": "1219.558789735903",
+        "ica_exportacion_combustible_energia": "214.35050402822134",
+        "ica_importaciones_totales": "4363.0",
+        "ica_importaciones_bienes_capital": "841.6079030654646",
+        "ica_importaciones_bienes_intermedios": "1556.6141000313041",
+        "ica_importaciones_combustibles_lubricantes": "414.15788635390385",
+        "ica_importaciones_piezas_accesorios_bienes_capital": "876.4332495212104",
+        "ica_importaciones_bienes_consumo": "549.8865338540564",
+        "ica_importaciones_vehiculos_automotores_pasajeros": "135.16000255756072",
+        "ica_importaciones_resto": "23.023031604300726",
+        "ica_bienes_capital_partes_piezas": "1718.041152586675",
+        "ica_bienes_intermedios_combustibles_lubricantes": "1970.771986385208",
+        "ica_importaciones_bs_consumo_vehiculos_automotor_pasajeros": "708.0695680159179",
+        "ica_saldo_comercial": "-567.0"
+      }
+    },
+    {
+      "source_row": 299,
+      "values_as_published": {
+        "indice_tiempo": "2016-10-01",
+        "ica_expo_totales": "4729.0",
+        "ica_exportacion_productos_primarios": "1104.0",
+        "ica_exportacion_manufacturas_origen_agropecuario": "1880.0",
+        "ica_exportacion_manufacturas_origen_industrial": "1520.0",
+        "ica_exportacion_combustible_energia": "224.0",
+        "ica_importaciones_totales": "4783.0",
+        "ica_importaciones_bienes_capital": "1176.0",
+        "ica_importaciones_bienes_intermedios": "1253.0",
+        "ica_importaciones_combustibles_lubricantes": "316.0",
+        "ica_importaciones_piezas_accesorios_bienes_capital": "1088.0",
+        "ica_importaciones_bienes_consumo": "648.0",
+        "ica_importaciones_vehiculos_automotores_pasajeros": "285.0",
+        "ica_importaciones_resto": "17.0",
+        "ica_bienes_capital_partes_piezas": "2264.0",
+        "ica_bienes_intermedios_combustibles_lubricantes": "1569.0",
+        "ica_importaciones_bs_consumo_vehiculos_automotor_pasajeros": "950.0",
+        "ica_saldo_comercial": "-54.0"
+      }
+    },
+    {
+      "source_row": 410,
+      "values_as_published": {
+        "indice_tiempo": "2026-01-01",
+        "ica_expo_totales": "7245.29604746",
+        "ica_exportacion_productos_primarios": "2088.63191996",
+        "ica_exportacion_manufacturas_origen_agropecuario": "2274.74532209",
+        "ica_exportacion_manufacturas_origen_industrial": "1949.99349107",
+        "ica_exportacion_combustible_energia": "931.92531434",
+        "ica_importaciones_totales": "5056.67015725",
+        "ica_importaciones_bienes_capital": "1087.87056276",
+        "ica_importaciones_bienes_intermedios": "1495.27512186",
+        "ica_importaciones_combustibles_lubricantes": "149.11035237",
+        "ica_importaciones_piezas_accesorios_bienes_capital": "891.07925481",
+        "ica_importaciones_bienes_consumo": "855.43711073",
+        "ica_importaciones_vehiculos_automotores_pasajeros": "483.70625354",
+        "ica_importaciones_resto": "94.19150118",
+        "ica_bienes_capital_partes_piezas": "1978.94981757",
+        "ica_bienes_intermedios_combustibles_lubricantes": "1644.38547423",
+        "ica_importaciones_bs_consumo_vehiculos_automotor_pasajeros": "1433.3348654499998",
+        "ica_saldo_comercial": "2188.6258902100008"
+      }
+    },
+    {
+      "source_row": 411,
+      "values_as_published": {
+        "indice_tiempo": "2026-02-01",
+        "ica_expo_totales": "5963.33901811",
+        "ica_exportacion_productos_primarios": "1740.66758942",
+        "ica_exportacion_manufacturas_origen_agropecuario": "1815.93791714",
+        "ica_exportacion_manufacturas_origen_industrial": "1736.30450266",
+        "ica_exportacion_combustible_energia": "670.42900889",
+        "ica_importaciones_totales": "5166.57388213",
+        "ica_importaciones_bienes_capital": "1061.2365448",
+        "ica_importaciones_bienes_intermedios": "1779.33035084",
+        "ica_importaciones_combustibles_lubricantes": "137.69619161",
+        "ica_importaciones_piezas_accesorios_bienes_capital": "920.57769641",
+        "ica_importaciones_bienes_consumo": "801.80819109",
+        "ica_importaciones_vehiculos_automotores_pasajeros": "370.24577429",
+        "ica_importaciones_resto": "95.67913309",
+        "ica_bienes_capital_partes_piezas": "1981.81424121",
+        "ica_bienes_intermedios_combustibles_lubricantes": "1917.0265424499999",
+        "ica_importaciones_bs_consumo_vehiculos_automotor_pasajeros": "1267.7330984700002",
+        "ica_saldo_comercial": "796.7651359800002"
+      }
+    }
+  ]
+}

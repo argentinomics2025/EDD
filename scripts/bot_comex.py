@@ -1,107 +1,146 @@
-import os
-import pandas as pd
-import requests
+"""Carga exclusivamente series oficiales; sin estimaciones ni borrados."""
+import argparse
 from io import StringIO
-from supabase import create_client, Client
+import csv
+from datetime import date
+from decimal import Decimal, InvalidOperation
+import math
+try:
+    from .ica_common import download, publish, cli, review_arguments
+except ImportError:
+    from ica_common import download, publish, cli, review_arguments
 
-def actualizar_comex():
-    print("🚢 [BOT COMEX] Iniciando la carga final y definitiva...")
-    
-    SUPABASE_URL = os.environ.get("SUPABASE_URL")
-    SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-    
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise ValueError("❌ ERROR: Faltan credenciales SUPABASE_URL o SUPABASE_KEY en los Secrets.")
+CSV_URL = 'https://infra.datos.gob.ar/catalog/sspm/dataset/74/distribution/74.3/download/intercambio-comercial-argentino-mensual.csv'
+MAPPING = {
+    'indice_tiempo': 'fecha',
+    'ica_expo_totales': 'exportaciones_usd_millions',
+    'ica_exportacion_productos_primarios': 'expo_primarios',
+    'ica_exportacion_manufacturas_origen_agropecuario': 'expo_moa',
+    'ica_exportacion_manufacturas_origen_industrial': 'expo_moi',
+    'ica_exportacion_combustible_energia': 'expo_energia',
+    'ica_importaciones_totales': 'importaciones_usd_millions',
+    'ica_importaciones_bienes_capital': 'impo_bienes_capital',
+    'ica_importaciones_bienes_intermedios': 'impo_bienes_intermedios',
+    'ica_importaciones_combustibles_lubricantes': 'impo_combustibles',
+    'ica_importaciones_piezas_accesorios_bienes_capital': 'impo_piezas_accesorios',
+    'ica_importaciones_bienes_consumo': 'impo_bienes_consumo',
+    'ica_importaciones_vehiculos_automotores_pasajeros': 'impo_vehiculos',
+    'ica_saldo_comercial': 'saldo_usd_millions'
+}
 
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    
-    try:
-        csv_url = "https://infra.datos.gob.ar/catalog/sspm/dataset/74/distribution/74.3/download/intercambio-comercial-argentino-mensual.csv"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"}
-        
-        print("👉 Descargando datos oficiales del INDEC...")
-        res = requests.get(csv_url, headers=headers, timeout=20)
-        res.raise_for_status() 
-        df = pd.read_csv(StringIO(res.text))
 
-        # MAPEO QUIRÚRGICO: Usamos los nombres exactos que nos tiró tu consola
-        mapeo_exacto = {
-            'indice_tiempo': 'fecha',
-            'ica_exportacion_productos_primarios': 'expo_primarios',
-            'ica_exportacion_manufacturas_origen_agropecuario': 'expo_moa',
-            'ica_exportacion_manufacturas_origen_industrial': 'expo_moi',
-            'ica_exportacion_combustible_energia': 'expo_energia',
-            'ica_importaciones_totales': 'importaciones_usd_millions',
-            'ica_importaciones_bienes_capital': 'impo_bienes_capital',
-            'ica_importaciones_bienes_intermedios': 'impo_bienes_intermedios',
-            'ica_importaciones_combustibles_lubricantes': 'impo_combustibles',
-            'ica_importaciones_piezas_accesorios_bienes_capital': 'impo_piezas_accesorios',
-            'ica_importaciones_bienes_consumo': 'impo_bienes_consumo',
-            'ica_importaciones_vehiculos_automotores_pasajeros': 'impo_vehiculos',
-            'ica_saldo_comercial': 'saldo_usd_millions'
-        }
+# Offline evidence only. None of these columns are added to publication records.
+OFFLINE_COLUMNS = {
+    'ica_importaciones_resto': 'aggregate_remainder_not_country',
+    'ica_bienes_capital_partes_piezas': 'overlapping_aggregate_not_additive',
+    'ica_bienes_intermedios_combustibles_lubricantes': 'overlapping_aggregate_not_additive',
+    'ica_importaciones_bs_consumo_vehiculos_automotor_pasajeros': 'aggregate_scope_requires_metadata',
+}
+SOURCE_COLUMNS = tuple(MAPPING) + tuple(OFFLINE_COLUMNS)
+EXPORT_COMPONENTS = ('ica_exportacion_productos_primarios', 'ica_exportacion_manufacturas_origen_agropecuario',
+                     'ica_exportacion_manufacturas_origen_industrial', 'ica_exportacion_combustible_energia')
+IMPORT_COMPONENTS = ('ica_importaciones_bienes_capital', 'ica_importaciones_bienes_intermedios',
+                     'ica_importaciones_combustibles_lubricantes', 'ica_importaciones_piezas_accesorios_bienes_capital',
+                     'ica_importaciones_bienes_consumo', 'ica_importaciones_vehiculos_automotores_pasajeros')
+# Observed precision: up to eight decimal places plus tiny serialized float residues.
+# Only the published total-total-balance identity is gated by this numeric bound.
+BALANCE_NUMERIC_TOLERANCE = Decimal('0.00000001')
 
-        # Filtramos solo las columnas que sabemos que están bien y las renombramos
-        columnas_a_usar = [col for col in mapeo_exacto.keys() if col in df.columns]
-        df = df[columnas_a_usar].rename(columns=mapeo_exacto)
-        
-        # Limpiamos los vacíos
-        df = df.fillna(0)
-        
-        # 🔥 LA MAGIA: Si el INDEC no nos da el total de exportaciones, ¡lo calculamos nosotros! 🔥
-        df['exportaciones_usd_millions'] = df['expo_primarios'] + df['expo_moa'] + df['expo_moi'] + df['expo_energia']
 
-        # Formateamos la fecha asegurando que sea string
-        df['fecha'] = pd.to_datetime(df['fecha']).dt.strftime('%Y-%m-%d')
-        records_historicos = df.to_dict(orient='records')
+def read_csv_offline(content):
+    """Preserve source strings and discrepancies separately from the unchanged DB field set.
 
-        # Datos recientes (Tu colchón de seguridad - FEBRERO ELIMINADO POR CONSISTENCIA)
-        datos_recientes = [
-            {'fecha': '2024-09-01', 'exportaciones_usd_millions': 6934, 'importaciones_usd_millions': 5954, 'saldo_usd_millions': 980, 'expo_primarios': 1446, 'expo_moa': 2816, 'expo_moi': 1845, 'expo_energia': 827, 'impo_bienes_capital': 1020, 'impo_bienes_intermedios': 2100, 'impo_combustibles': 350, 'impo_piezas_accesorios': 1200, 'impo_bienes_consumo': 680, 'impo_vehiculos': 604},
-            {'fecha': '2024-10-01', 'exportaciones_usd_millions': 6128, 'importaciones_usd_millions': 6010, 'saldo_usd_millions': 118, 'expo_primarios': 1029, 'expo_moa': 2398, 'expo_moi': 1888, 'expo_energia': 813, 'impo_bienes_capital': 1050, 'impo_bienes_intermedios': 2150, 'impo_combustibles': 400, 'impo_piezas_accesorios': 1250, 'impo_bienes_consumo': 600, 'impo_vehiculos': 560},
-            {'fecha': '2024-11-01', 'exportaciones_usd_millions': 6480, 'importaciones_usd_millions': 5459, 'saldo_usd_millions': 1021, 'expo_primarios': 1050, 'expo_moa': 2400, 'expo_moi': 2100, 'expo_energia': 930, 'impo_bienes_capital': 980, 'impo_bienes_intermedios': 1900, 'impo_combustibles': 300, 'impo_piezas_accesorios': 1100, 'impo_bienes_consumo': 650, 'impo_vehiculos': 529},
-            {'fecha': '2024-12-01', 'exportaciones_usd_millions': 6200, 'importaciones_usd_millions': 5100, 'saldo_usd_millions': 1100, 'expo_primarios': 950, 'expo_moa': 2300, 'expo_moi': 2050, 'expo_energia': 900, 'impo_bienes_capital': 950, 'impo_bienes_intermedios': 1800, 'impo_combustibles': 320, 'impo_piezas_accesorios': 1000, 'impo_bienes_consumo': 550, 'impo_vehiculos': 480},
-            {'fecha': '2025-01-01', 'exportaciones_usd_millions': 5800, 'importaciones_usd_millions': 4800, 'saldo_usd_millions': 1000, 'expo_primarios': 1100, 'expo_moa': 2100, 'expo_moi': 1800, 'expo_energia': 800, 'impo_bienes_capital': 900, 'impo_bienes_intermedios': 1700, 'impo_combustibles': 250, 'impo_piezas_accesorios': 1100, 'impo_bienes_consumo': 500, 'impo_vehiculos': 350},
-            {'fecha': '2025-02-01', 'exportaciones_usd_millions': 5900, 'importaciones_usd_millions': 4700, 'saldo_usd_millions': 1200, 'expo_primarios': 1150, 'expo_moa': 2150, 'expo_moi': 1750, 'expo_energia': 850, 'impo_bienes_capital': 880, 'impo_bienes_intermedios': 1650, 'impo_combustibles': 220, 'impo_piezas_accesorios': 1050, 'impo_bienes_consumo': 520, 'impo_vehiculos': 380},
-            {'fecha': '2025-03-01', 'exportaciones_usd_millions': 6500, 'importaciones_usd_millions': 4900, 'saldo_usd_millions': 1600, 'expo_primarios': 1700, 'expo_moa': 2400, 'expo_moi': 1500, 'expo_energia': 900, 'impo_bienes_capital': 920, 'impo_bienes_intermedios': 1750, 'impo_combustibles': 240, 'impo_piezas_accesorios': 1100, 'impo_bienes_consumo': 500, 'impo_vehiculos': 390},
-            {'fecha': '2025-04-01', 'exportaciones_usd_millions': 6800, 'importaciones_usd_millions': 5100, 'saldo_usd_millions': 1700, 'expo_primarios': 1800, 'expo_moa': 2600, 'expo_moi': 1500, 'expo_energia': 900, 'impo_bienes_capital': 950, 'impo_bienes_intermedios': 1800, 'impo_combustibles': 260, 'impo_piezas_accesorios': 1200, 'impo_bienes_consumo': 510, 'impo_vehiculos': 380},
-            {'fecha': '2025-05-01', 'exportaciones_usd_millions': 7800, 'importaciones_usd_millions': 5200, 'saldo_usd_millions': 2600, 'expo_primarios': 2400, 'expo_moa': 3100, 'expo_moi': 1450, 'expo_energia': 850, 'impo_bienes_capital': 980, 'impo_bienes_intermedios': 1850, 'impo_combustibles': 280, 'impo_piezas_accesorios': 1250, 'impo_bienes_consumo': 490, 'impo_vehiculos': 350},
-            {'fecha': '2025-06-01', 'exportaciones_usd_millions': 7276, 'importaciones_usd_millions': 6370, 'saldo_usd_millions': 906, 'expo_primarios': 2100, 'expo_moa': 2800, 'expo_moi': 1300, 'expo_energia': 1076, 'impo_bienes_capital': 1100, 'impo_bienes_intermedios': 2200, 'impo_combustibles': 500, 'impo_piezas_accesorios': 1300, 'impo_bienes_consumo': 700, 'impo_vehiculos': 570},
-            {'fecha': '2025-07-01', 'exportaciones_usd_millions': 7727, 'importaciones_usd_millions': 6738, 'saldo_usd_millions': 989, 'expo_primarios': 2000, 'expo_moa': 2900, 'expo_moi': 1400, 'expo_energia': 1427, 'impo_bienes_capital': 1200, 'impo_bienes_intermedios': 2300, 'impo_combustibles': 700, 'impo_piezas_accesorios': 1400, 'impo_bienes_consumo': 750, 'impo_vehiculos': 388},
-            {'fecha': '2025-08-01', 'exportaciones_usd_millions': 7500, 'importaciones_usd_millions': 6500, 'saldo_usd_millions': 1000, 'expo_primarios': 1800, 'expo_moa': 2850, 'expo_moi': 1450, 'expo_energia': 1400, 'impo_bienes_capital': 1150, 'impo_bienes_intermedios': 2250, 'impo_combustibles': 650, 'impo_piezas_accesorios': 1350, 'impo_bienes_consumo': 700, 'impo_vehiculos': 400},
-            {'fecha': '2025-09-01', 'exportaciones_usd_millions': 7300, 'importaciones_usd_millions': 6200, 'saldo_usd_millions': 1100, 'expo_primarios': 1600, 'expo_moa': 2750, 'expo_moi': 1550, 'expo_energia': 1400, 'impo_bienes_capital': 1100, 'impo_bienes_intermedios': 2150, 'impo_combustibles': 500, 'impo_piezas_accesorios': 1300, 'impo_bienes_consumo': 650, 'impo_vehiculos': 500},
-            {'fecha': '2025-10-01', 'exportaciones_usd_millions': 7954, 'importaciones_usd_millions': 7154, 'saldo_usd_millions': 800, 'expo_primarios': 1500, 'expo_moa': 2900, 'expo_moi': 1800, 'expo_energia': 1754, 'impo_bienes_capital': 1300, 'impo_bienes_intermedios': 2500, 'impo_combustibles': 600, 'impo_piezas_accesorios': 1500, 'impo_bienes_consumo': 800, 'impo_vehiculos': 454},
-            {'fecha': '2025-11-01', 'exportaciones_usd_millions': 8096, 'importaciones_usd_millions': 5598, 'saldo_usd_millions': 2498, 'expo_primarios': 1550, 'expo_moa': 2950, 'expo_moi': 1900, 'expo_energia': 1696, 'impo_bienes_capital': 1000, 'impo_bienes_intermedios': 2000, 'impo_combustibles': 300, 'impo_piezas_accesorios': 1100, 'impo_bienes_consumo': 650, 'impo_vehiculos': 548},
-            {'fecha': '2025-12-01', 'exportaciones_usd_millions': 7448, 'importaciones_usd_millions': 5556, 'saldo_usd_millions': 1892, 'expo_primarios': 1300, 'expo_moa': 2700, 'expo_moi': 1800, 'expo_energia': 1648, 'impo_bienes_capital': 950, 'impo_bienes_intermedios': 2000, 'impo_combustibles': 280, 'impo_piezas_accesorios': 1100, 'impo_bienes_consumo': 700, 'impo_vehiculos': 526},
-            {'fecha': '2026-01-01', 'exportaciones_usd_millions': 7057, 'importaciones_usd_millions': 5070, 'saldo_usd_millions': 1987, 'expo_primarios': 1200, 'expo_moa': 2500, 'expo_moi': 1700, 'expo_energia': 1657, 'impo_bienes_capital': 850, 'impo_bienes_intermedios': 1850, 'impo_combustibles': 250, 'impo_piezas_accesorios': 1000, 'impo_bienes_consumo': 600, 'impo_vehiculos': 520}
-        ]
+    Reports are not upload payloads. Edition and historical methodology are unknown.
+    """
+    rows = list(csv.reader(StringIO(content.decode('utf-8-sig')), strict=True))
+    if len(rows) < 2 or len(rows[0]) != len(set(rows[0])) or set(SOURCE_COLUMNS) - set(rows[0]):
+        raise ValueError('CSV vacío, encabezados duplicados o columnas requeridas ausentes')
+    header = rows[0]
+    records, source_records, checks, seen = [], [], [], set()
+    for line, cells in enumerate(rows[1:], 2):
+        if len(cells) != len(header):
+            raise ValueError(f'Cantidad de campos incorrecta en fila {line}')
+        raw = dict(zip(header, cells))
+        when = raw['indice_tiempo']
+        try:
+            parsed_date = date.fromisoformat(when)
+        except ValueError as exc:
+            raise ValueError('Fecha inválida') from exc
+        if (parsed_date.isoformat() != when or parsed_date.day != 1 or parsed_date > date.today()
+                or when in seen):
+            raise ValueError('Fecha no mensual, futura o duplicada')
+        seen.add(when)
+        values = {}
+        for col in SOURCE_COLUMNS:
+            if col == 'indice_tiempo':
+                continue
+            try:
+                value = Decimal(raw[col])
+            except InvalidOperation as exc:
+                raise ValueError(f'Importe inválido en {when}: {col}') from exc
+            if not value.is_finite() or not math.isfinite(float(value)):
+                raise ValueError('Importe no finito o no representable')
+            if col != 'ica_saldo_comercial' and value < 0:
+                raise ValueError('Flujo negativo')
+            values[col] = value
+        def total(columns):
+            return sum((values[c] for c in columns), Decimal(0))
+        def comparison(components, published):
+            delta = components - published
+            return {'computed_sum': str(components), 'published_total': str(published),
+                    'delta': str(delta), 'discrepancy_recorded': delta != 0,
+                    'cause': 'not_attributed', 'adjustment_applied': False}
+        balance_sum = values['ica_expo_totales'] - values['ica_importaciones_totales']
+        balance = comparison(balance_sum, values['ica_saldo_comercial'])
+        balance['within_numeric_tolerance'] = abs(Decimal(balance['delta'])) <= BALANCE_NUMERIC_TOLERANCE
+        if not balance['within_numeric_tolerance']:
+            raise ValueError(f'Saldo publicado incoherente con totales en {when}; no se ajustaron valores')
+        check = {'period': when,
+                 'export_components': comparison(total(EXPORT_COMPONENTS), values['ica_expo_totales']),
+                 'import_components_without_resto': comparison(total(IMPORT_COMPONENTS), values['ica_importaciones_totales']),
+                 'import_components_with_resto': comparison(total(IMPORT_COMPONENTS + ('ica_importaciones_resto',)), values['ica_importaciones_totales']),
+                 'published_balance': balance}
+        for label, components, target in [
+            ('capital_parts', ('ica_importaciones_bienes_capital', 'ica_importaciones_piezas_accesorios_bienes_capital'), 'ica_bienes_capital_partes_piezas'),
+            ('intermediate_energy', ('ica_importaciones_bienes_intermedios', 'ica_importaciones_combustibles_lubricantes'), 'ica_bienes_intermedios_combustibles_lubricantes'),
+            ('consumption_vehicles_resto_observed', ('ica_importaciones_bienes_consumo', 'ica_importaciones_vehiculos_automotores_pasajeros', 'ica_importaciones_resto'), 'ica_importaciones_bs_consumo_vehiculos_automotor_pasajeros')]:
+            check[label] = comparison(total(components), values[target])
+        record = {dest: when if col == 'indice_tiempo' else float(values[col]) for col, dest in MAPPING.items()}
+        records.append(record)
+        source_records.append({'source_row': line, 'period': when, 'values_as_published': raw})
+        checks.append(check)
+    minimum, maximum = min(seen), max(seen)
+    cursor, last = date.fromisoformat(minimum), date.fromisoformat(maximum)
+    missing_months = []
+    while cursor <= last:
+        if cursor.isoformat() not in seen:
+            missing_months.append(cursor.isoformat())
+        cursor = date(cursor.year + (cursor.month == 12), 1 if cursor.month == 12 else cursor.month + 1, 1)
+    return {'records': records, 'source_records': source_records, 'economic_checks': checks,
+            'columns': header,
+            'column_disposition': {col: ('mapped_existing_field:' + MAPPING[col] if col in MAPPING else
+                                        'offline_only:' + OFFLINE_COLUMNS[col] if col in OFFLINE_COLUMNS else
+                                        'preserved_unclassified_source_column') for col in header},
+            'coverage': {'rows': len(records), 'date_range': [minimum, maximum], 'missing_months': missing_months,
+                         'ascending': [r['fecha'] for r in records] == sorted(seen)},
+            'source_edition_date': None, 'methodological_cause': 'not_verified',
+            'unit_context': 'million_USD_consistent_with_selected_XLS_not_certified_for_entire_series',
+            'balance_numeric_tolerance_source_units': str(BALANCE_NUMERIC_TOLERANCE),
+            'persistence_field_set_changed': False}
 
-        # Consolidamos (¡EL ORDEN IMPORTA!)
-        datos_dict = {}
-        
-        # 1. Primero metemos el colchón de seguridad manual
-        for r in datos_recientes:
-            datos_dict[r['fecha']] = r
-            
-        # 2. Luego pisamos con los datos del INDEC. 
-        # Si el INDEC publicó un mes que tenías estimado a mano, EL DATO OFICIAL GANA.
-        for r in records_historicos:
-            datos_dict[r['fecha']] = r
-            
-        records_finales = list(datos_dict.values())
-        print(f"🚀 Subiendo {len(records_finales)} meses impecables a Supabase...")
 
-        # Batch upload de a 500 registros para no saturar Supabase
-        for i in range(0, len(records_finales), 500):
-            lote = records_finales[i:i+500]
-            supabase.table('datos_comex').upsert(lote, on_conflict='fecha').execute()
+def parse_csv(content):
+    """Compatibility view: original output fields, now using the published export total."""
+    return read_csv_offline(content)['records']
 
-        print("✅ [BOT COMEX] Base de datos restaurada. Sin warnings, sin errores y con toda la data.")
 
-    except requests.exceptions.RequestException as e:
-        print(f"⚠️ Error de red al descargar el CSV del INDEC: {e}")
-    except Exception as e:
-        print(f"❌ Error crítico: {e}")
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--write', action='store_true')
+    args = review_arguments(parser).parse_args(argv)
+    records = parse_csv(download(CSV_URL, 'infra.datos.gob.ar'))
+    publish('datos_comex', records, ('fecha',), args.write, reviewed_sha256=args.reviewed_sha256)
 
-if __name__ == "__main__":
-    actualizar_comex()
+
+if __name__ == '__main__':
+    raise SystemExit(cli(main))

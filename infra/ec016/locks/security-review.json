@@ -1,0 +1,232 @@
+{
+  "checked_at": "2026-10-24T17:38:17.673816+00:00",
+  "scope": "metadata only; no images downloaded or executed",
+  "dependencies": [
+    {
+      "name": "annotated-types",
+      "version": "0.8.0",
+      "url": "https://pypi.org/pypi/annotated-types/0.8.0/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "anyio",
+      "version": "4.15.1",
+      "url": "https://pypi.org/pypi/anyio/4.15.1/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "certifi",
+      "version": "2026.10.23",
+      "url": "https://pypi.org/pypi/certifi/2026.10.23/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "deprecation",
+      "version": "2.1.0",
+      "url": "https://pypi.org/pypi/deprecation/2.1.0/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "h11",
+      "version": "0.16.0",
+      "url": "https://pypi.org/pypi/h11/0.16.0/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "h2",
+      "version": "4.4.1",
+      "url": "https://pypi.org/pypi/h2/4.4.1/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "hpack",
+      "version": "4.2.0",
+      "url": "https://pypi.org/pypi/hpack/4.2.0/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "httpcore",
+      "version": "1.0.9",
+      "url": "https://pypi.org/pypi/httpcore/1.0.9/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "url": "https://pypi.org/pypi/httpx/0.28.1/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "hyperframe",
+      "version": "6.1.0",
+      "url": "https://pypi.org/pypi/hyperframe/6.1.0/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "idna",
+      "version": "3.20",
+      "url": "https://pypi.org/pypi/idna/3.20/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "packaging",
+      "version": "26.3",
+      "url": "https://pypi.org/pypi/packaging/26.3/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "postgrest",
+      "version": "0.19.3",
+      "url": "https://pypi.org/pypi/postgrest/0.19.3/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "psycopg",
+      "version": "3.2.6",
+      "url": "https://pypi.org/pypi/psycopg/3.2.6/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "psycopg-binary",
+      "version": "3.2.6",
+      "url": "https://pypi.org/pypi/psycopg-binary/3.2.6/json",
+      "hash_count": 65,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "pydantic",
+      "version": "2.14.1",
+      "url": "https://pypi.org/pypi/pydantic/2.14.1/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "pydantic-core",
+      "version": "2.50.1",
+      "url": "https://pypi.org/pypi/pydantic-core/2.50.1/json",
+      "hash_count": 137,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "typing-extensions",
+      "version": "4.16.0",
+      "url": "https://pypi.org/pypi/typing-extensions/4.16.0/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    },
+    {
+      "name": "typing-inspection",
+      "version": "0.4.4",
+      "url": "https://pypi.org/pypi/typing-inspection/0.4.4/json",
+      "hash_count": 2,
+      "hashes_verified": true,
+      "yanked": false,
+      "vulnerabilities": [],
+      "status": "verified"
+    }
+  ],
+  "image_manifests": {
+    "postgres": {
+      "reference": "docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8",
+      "amd64_manifest_digest": "sha256:714b08dd70c05160db032e4321033ac4e5b6328935b2d03ed419c3a898aa8219"
+    },
+    "python": {
+      "reference": "docker.io/library/python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e",
+      "amd64_manifest_digest": "sha256:1aaa65a85fda306ffb8b910824d4e93bdce61e212c7e87168123ea3073b41a1a"
+    },
+    "postgrest": {
+      "reference": "docker.io/postgrest/postgrest:v12.2.12@sha256:5f4ce744539bbba786b4e24dbbd95bdb2a956dcf568c5374995a0ff4a68f5bd2",
+      "amd64_manifest_digest": "sha256:be3b6ab31a94e3e89f08edad40be0234ae0951e3297f2043d797c219165f5afa"
+    },
+    "scanner": {
+      "reference": "docker.io/aquasec/trivy:0.69.3@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c",
+      "amd64_manifest_digest": "sha256:7228e304ae0f610a1fad937baa463598cadac0c2ac4027cc68f3a8b997115689"
+    }
+  },
+  "unavailable_sources": [
+    {
+      "url": "https://www.postgresql.org/support/security/16/",
+      "error": "<urlopen error Tunnel connection failed: 403 Forbidden>"
+    },
+    {
+      "url": "https://www.python.org/downloads/release/python-31211/",
+      "error": "<urlopen error Tunnel connection failed: 403 Forbidden>"
+    },
+    {
+      "url": "https://api.osv.dev/v1/querybatch",
+      "error": "<urlopen error Tunnel connection failed: 403 Forbidden>"
+    }
+  ],
+  "material_limits": [
+    "PyPI advisories do not cover Debian, CPython stdlib, libpq/OpenSSL bundled in wheels or malicious code.",
+    "Image package CVEs require mandatory fresh-DB offline scans before SQL. No image vulnerability clearance claimed locally."
+  ]
+}
