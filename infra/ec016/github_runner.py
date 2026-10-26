@@ -251,7 +251,7 @@ def validate_report(report):
         raise RuntimeError('Missing, incomplete or unsuccessful integration report')
 
 
-def main():
+def legacy_main():
     try:
         with stage('CONTEXT'):
             validate_host_context()  # Before filesystem state or any daemon contact.
@@ -262,6 +262,11 @@ def main():
         emit(failure.stage,failure.code,'FAILED',subject=failure.subject,reason=failure.reason)
         print('EC016_FAILED: fixed diagnostics above; raw diagnostics withheld.',flush=True)
         raise SystemExit(1) from None
+
+
+def main():
+    print('EC016_FAILED: PLAN_B_WORKFLOW_REQUIRED; obsolete orchestrator disabled.')
+    raise SystemExit(1)
 
 
 if __name__=='__main__':main()

@@ -1,23 +1,21 @@
-# EC-016 — laboratorio GitHub-hosted, listo para autorización
+# EC-016 Plan B — servicios de GitHub Actions
 
-**PAQUETE EXPERIMENTAL. NO REGISTRADO EN MAIN. NO AUTORIZADO PARA EJECUCIÓN. NO APTO PARA PRODUCCIÓN.**
+**NO APTO PARA PRODUCCIÓN. NO EJECUTADO EN ESTA INTERVENCIÓN.**
 
-Procedimiento vigente y comandos: [ec-016-runbook.md](../../docs/ec-016-runbook.md).
-El workflow estable se registra exclusivamente en main tras aprobación; selecciona
-un SHA experimental mediante variable externa y confirmación manual unipersonal.
-No requiere segundo revisor ni presume protecciones no verificadas. No se utiliza
-el daemon de Codex: engine-approval.json permanece bloqueado.
+Procedimiento vigente: [ec-016-plan-b.md](../../docs/ec-016-plan-b.md).
+Dos jobs: escaneo nativo obligatorio con action oficial fijada; luego PostgreSQL
+service container, bootstrap sintético, PostgREST y las once pruebas originales.
+Sin Compose, sin imagen Trivy exportada ni descarga manual de DB en contenedor.
 
-No ejecutar compose.yaml directamente: es deliberadamente vacío. github_runner
-orquesta únicamente el job autorizado ubuntu-24.04; labctl conserva preflight,
-atestación y limpieza propia. security_gate exige revisión de imágenes antes de SQL.
-Las once integraciones no se han ejecutado. Ver locks/security-review.json para
-evidencia verificable y límites, y el runbook para política de vulnerabilidades.
+La plantilla en esta rama debe ser autorizada y copiada a main para activar Plan B;
+no se hizo ese cambio ni se configuró EC016_APPROVED_SHA. El CLI anterior devuelve
+PLAN_B_WORKFLOW_REQUIRED. Los archivos de Plan A se conservan como antecedente y
+para regresiones; ningún workflow nuevo los usa para orquestar el laboratorio.
 
-Pruebas preparatorias sin servicios:
+Validación local sin Docker, red ni SQL:
 
 ```bash
-python -m unittest discover -s tests -p 'test_ec016*.py' -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m infra.ec016.check_local
 ```
 
-Los documentos previos son antecedentes, no instrucciones alternativas de arranque.
+No utilizar el daemon de Codex. No ejecutar compose.yaml ni legacy_main.

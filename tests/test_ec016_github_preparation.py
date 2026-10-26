@@ -51,10 +51,12 @@ class GithubPreparation(unittest.TestCase):
         self.assertEqual(permissions.strip(),'contents: read')
         self.assertIn('cancel-in-progress: false',text)
         jobs=text.split('\njobs:\n',1)[1]
-        self.assertEqual(re.findall(r'^  ([a-z-]+):',jobs,re.M),['disposable-integration'])
-        self.assertEqual(re.findall(r'runs-on: ([^\n]+)',jobs),['ubuntu-24.04'])
-        self.assertIn('timeout-minutes: 40',jobs)
-        self.assertNotRegex(jobs,r'(?m)^    (services|environment):')
+        self.assertEqual(re.findall(r'^  ([a-z-]+):',jobs,re.M),['scan','integration'])
+        self.assertEqual(re.findall(r'runs-on: ([^\n]+)',jobs),['ubuntu-24.04','ubuntu-24.04'])
+        self.assertIn('timeout-minutes: 30',jobs);self.assertIn('timeout-minutes: 15',jobs)
+        self.assertNotRegex(jobs,r'(?m)^    environment:')
+        self.assertIn('needs: scan',jobs);self.assertIn("needs.scan.result == 'success'",jobs)
+        self.assertIn('    services:\n      postgres:',jobs)
         for expression in ("github.event_name == 'workflow_dispatch'",'github.event.repository.private == false',
                            "github.ref == 'refs/heads/main'"):
             self.assertIn(expression,jobs)
@@ -62,7 +64,7 @@ class GithubPreparation(unittest.TestCase):
             self.assertNotIn(forbidden,text)
         self.assertIn('persist-credentials: false',text)
         actions=re.findall(r'uses: ([^\s]+)',text)
-        self.assertEqual(len(actions),1)
+        self.assertEqual(len(actions),6)
         for action in actions:self.assertRegex(action,r'@[a-f0-9]{40}$')
 
     def test_hosted_context_accepted(self):

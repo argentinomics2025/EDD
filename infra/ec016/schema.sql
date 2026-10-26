@@ -16,6 +16,7 @@ DO $$ BEGIN
     RAISE EXCEPTION 'Run context or fresh database marker invalid; refusing bootstrap';
   END IF;
 END $$;
+-- EC016_SHARED_FIXTURE_BODY
 BEGIN;
 CREATE ROLE ec016_authenticator LOGIN NOINHERIT PASSWORD 'EC016_SYNTHETIC_AUTH_ONLY';
 CREATE ROLE ec016_reader NOLOGIN NOBYPASSRLS;

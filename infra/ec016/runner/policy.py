@@ -156,7 +156,10 @@ def validate_effective(actual, expected):
 
 
 def validate_marker_payload(payload, manifest):
-    validate_manifest(manifest)
+    if manifest.get('mode')=='GITHUB_SERVICES_SYNTHETIC_ONLY':
+        from ..services import validate_context
+        validate_context(manifest)
+    else:validate_manifest(manifest)
     if payload!={'scope':SCOPE,'run_id':manifest['run_id'],'owner_token':manifest['owner_token']}:
         raise RuntimeError('Marker belongs to a different run')
 

@@ -1,3 +1,6 @@
+**PLAN B VIGENTE:** ver [ec-016-plan-b.md](ec-016-plan-b.md).
+Las instrucciones de Plan A siguientes quedan como antecedente, no ejecutarlas.
+
 # EC-016 — paquete local listo para autorización de publicación y ejecución
 
 **PUBLICACIÓN EXPERIMENTAL AUTORIZADA. LABORATORIO NO EJECUTADO. NO APTO PARA PRODUCCIÓN.**

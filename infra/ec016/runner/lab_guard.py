@@ -34,6 +34,9 @@ def assert_opt_in(environment=None):
 
 def runtime_context():
     assert_opt_in()
+    if os.environ.get('EC016_ACTIONS_SERVICES') is not None:
+        from ..services import runtime_context as services_context
+        return services_context()
     root=Path('/run/ec016')
     if not Path('/.dockerenv').is_file():raise RuntimeError('Must run inside the attested container')
     manifest=policy.validate_manifest(json.loads((root/'manifest.json').read_text()))
@@ -73,8 +76,9 @@ def runtime_context():
 
 
 def validate_http_target(url):
+    allowed_host='postgrest' if os.environ.get('EC016_ACTIONS_SERVICES') else '172.30.216.3'
     parsed = urlsplit(str(url))
-    if (parsed.scheme != 'http' or parsed.hostname != '172.30.216.3' or parsed.port != 3000
+    if (parsed.scheme != 'http' or parsed.hostname != allowed_host or parsed.port != 3000
             or parsed.username or parsed.password or parsed.fragment
             or parsed.path.strip('/') not in (*TABLES, 'ec016_metadata', 'no_unique_fixture')):
         raise ValueError('Only the fixed EC016 disposable API resources are allowed')
@@ -82,7 +86,8 @@ def validate_http_target(url):
 
 def db_parameters():
     # No input URL and no environment-derived DSN or credentials.
-    return {'host':DB_HOST, 'hostaddr':DB_HOST, 'port':5432, 'dbname':DB_NAME,
+    host='postgres' if os.environ.get('EC016_ACTIONS_SERVICES') else DB_HOST
+    return {'host':host, **({} if host=='postgres' else {'hostaddr':DB_HOST}), 'port':5432, 'dbname':DB_NAME,
             'user':'ec016_admin', 'password':'EC016_SYNTHETIC_ADMIN_ONLY',
             'connect_timeout':3, 'application_name':'ec016-disposable-tests'}
 
@@ -132,7 +137,7 @@ def api_client(role='ec016_writer', scope='synthetic', anonymous=False):
             validate_http_target(request.url)
             runtime_context()  # Context is mandatory for every request.
             if request.method not in ('GET','HEAD'):
-                marker_request=httpx.Request('GET',API_URL+'/ec016_metadata?name=eq.scope&select=value,run_id,owner_token',
+                marker_request=httpx.Request('GET',api_url+'/ec016_metadata?name=eq.scope&select=value,run_id,owner_token',
                                             headers={'Accept-Profile':'api'})
                 marker_response=self.inner.handle_request(marker_request)
                 try:
@@ -153,11 +158,12 @@ def api_client(role='ec016_writer', scope='synthetic', anonymous=False):
         def close(self):self.inner.close()
     headers={'Accept-Profile':'api','Content-Profile':'api'}
     if not anonymous:headers['Authorization']='Bearer '+jwt(role,scope)
-    client=SyncPostgrestClient(API_URL,schema='api',headers=headers)
+    api_url='http://postgrest:3000' if os.environ.get('EC016_ACTIONS_SERVICES') else API_URL
+    client=SyncPostgrestClient(api_url,schema='api',headers=headers)
     # Replace the default session BEFORE the first request: no proxy inheritance,
     # redirects or general outbound transport. SDK API must be verified at first run.
     client.session.close()
     transport=GuardedTransport()
-    client.session=httpx.Client(base_url=API_URL,headers=headers,transport=transport,
+    client.session=httpx.Client(base_url=api_url,headers=headers,transport=transport,
                                timeout=5,trust_env=False,follow_redirects=False)
     return client,transport

@@ -19,21 +19,29 @@ concurrency:
   group: ec016-manual-laboratory
   cancel-in-progress: false
 
+env:
+  EC016_GITHUB_DISPOSABLE: EC016_DISPOSABLE_ONLY
+  EC016_SOURCE_SHA: ${{ inputs.lab_sha }}
+  EC016_MANUAL_CONFIRMATION: ${{ inputs.confirmation }}
+  EC016_APPROVED_SHA: ${{ vars.EC016_APPROVED_SHA }}
+  PYTHONDONTWRITEBYTECODE: '1'
+  EC016_POSTGRES_IMAGE: docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8
+  EC016_POSTGREST_IMAGE: docker.io/postgrest/postgrest:v12.2.12@sha256:5f4ce744539bbba786b4e24dbbd95bdb2a956dcf568c5374995a0ff4a68f5bd2
+  EC016_PYTHON_IMAGE: docker.io/library/python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
+
 jobs:
-  disposable-integration:
+  scan:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.repository == 'argentinomics2025/EDD' &&
       github.event.repository.private == false &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 30
+    outputs:
+      lab_sha: ${{ steps.authorization.outputs.sha }}
     env:
-      EC016_GITHUB_DISPOSABLE: EC016_DISPOSABLE_ONLY
-      EC016_SOURCE_SHA: ${{ inputs.lab_sha }}
-      EC016_MANUAL_CONFIRMATION: ${{ inputs.confirmation }}
-      EC016_APPROVED_SHA: ${{ vars.EC016_APPROVED_SHA }}
-      PYTHONDONTWRITEBYTECODE: '1'
+      EC016_SCAN_RUNNER_TAG: ec016-scan-runner:${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       # Trusted policy lives ONLY in main; no experimental checkout before this step.
       # Single-operator authorization, deliberately NOT a simulated second review.
@@ -74,7 +82,7 @@ jobs:
           with open(e['GITHUB_OUTPUT'], 'a') as output:
               output.write('sha=' + sha + '\n')
           PY
-      - name: Checkout del SHA aprobado sin credenciales persistentes
+      - name: Checkout SHA autorizado
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ steps.authorization.outputs.sha }}
@@ -82,8 +90,142 @@ jobs:
           fetch-depth: 1
           submodules: false
           lfs: false
-      - name: Escaneo obligatorio y once pruebas sinteticas con salida saneada
+      - name: Instalar binario Trivy verificado y preparar politica vacia
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m infra.ec016.github_runner
+          install -d -m 700 "$RUNNER_TEMP/ec016-trivy"
+          curl --fail --silent --show-error --location --retry 3             https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz             -o "$RUNNER_TEMP/ec016-trivy/trivy.tar.gz"
+          echo "1816b632dfe529869c740c0913e36bd1629cb7688bd5634f4a858c1d57c88b75  $RUNNER_TEMP/ec016-trivy/trivy.tar.gz" | sha256sum --check --status
+          tar -xzf "$RUNNER_TEMP/ec016-trivy/trivy.tar.gz" -C "$RUNNER_TEMP/ec016-trivy" trivy
+          echo "$RUNNER_TEMP/ec016-trivy" >> "$GITHUB_PATH"
+          printf '{}\n' > "$RUNNER_TEMP/ec016-trivy/config.yaml"
+          : > "$RUNNER_TEMP/ec016-trivy/empty.ignore"
+          printf 'TRIVY_CONFIG=%s\nTRIVY_IGNOREFILE=%s\n' "$RUNNER_TEMP/ec016-trivy/config.yaml" "$RUNNER_TEMP/ec016-trivy/empty.ignore" >> "$GITHUB_ENV"
+      - name: Construir imagen de dependencias con base y wheels fijados
+        shell: bash
+        run: |
+          set -euo pipefail
+          for component in POSTGRES POSTGREST PYTHON; do
+            image_var="EC016_${component}_IMAGE"
+            docker --host unix:///var/run/docker.sock pull --platform linux/amd64 "${!image_var}" > "$RUNNER_TEMP/ec016-pull.log" 2>&1
+            printf 'EC016_SCANNED_%s_ID=%s\n' "$component" "$(docker --host unix:///var/run/docker.sock image inspect --format '{{.Id}}' "${!image_var}")" >> "$GITHUB_ENV"
+          done
+          docker --host unix:///var/run/docker.sock build --platform linux/amd64 --build-arg PYTHON_IMAGE="$EC016_PYTHON_IMAGE" \
+            -t "$EC016_SCAN_RUNNER_TAG" infra/ec016 > "$RUNNER_TEMP/ec016-build.log" 2>&1
+          printf 'EC016_SCANNED_RUNNER_ID=%s\n' "$(docker --host unix:///var/run/docker.sock image inspect --format '{{.Id}}' "$EC016_SCAN_RUNNER_TAG")" >> "$GITHUB_ENV"
+      - name: Escaneo obligatorio PostgreSQL
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
+        with:
+          scan-type: image
+          image-ref: docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8
+          version: v0.69.3
+          skip-setup-trivy: 'true'
+          cache: 'false'
+          cache-dir: ${{ runner.temp }}/ec016-trivy/cache
+          scanners: vuln
+          list-all-pkgs: 'true'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '1'
+          format: json
+          output: ${{ runner.temp }}/ec016-trivy/postgresql.json
+          hide-progress: 'true'
+          timeout: 10m
+      - name: Escaneo obligatorio PostgREST
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
+        with:
+          scan-type: image
+          image-ref: docker.io/postgrest/postgrest:v12.2.12@sha256:5f4ce744539bbba786b4e24dbbd95bdb2a956dcf568c5374995a0ff4a68f5bd2
+          version: v0.69.3
+          skip-setup-trivy: 'true'
+          cache: 'false'
+          cache-dir: ${{ runner.temp }}/ec016-trivy/cache
+          scanners: vuln
+          list-all-pkgs: 'true'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '1'
+          format: json
+          output: ${{ runner.temp }}/ec016-trivy/postgrest.json
+          hide-progress: 'true'
+          timeout: 10m
+      - name: Escaneo obligatorio Python
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
+        with:
+          scan-type: image
+          image-ref: docker.io/library/python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
+          version: v0.69.3
+          skip-setup-trivy: 'true'
+          cache: 'false'
+          cache-dir: ${{ runner.temp }}/ec016-trivy/cache
+          scanners: vuln
+          list-all-pkgs: 'true'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '1'
+          format: json
+          output: ${{ runner.temp }}/ec016-trivy/python.json
+          hide-progress: 'true'
+          timeout: 10m
+      - name: Escaneo obligatorio Runner y dependencias instaladas
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
+        with:
+          scan-type: image
+          image-ref: ${{ env.EC016_SCAN_RUNNER_TAG }}
+          version: v0.69.3
+          skip-setup-trivy: 'true'
+          cache: 'false'
+          cache-dir: ${{ runner.temp }}/ec016-trivy/cache
+          scanners: vuln
+          list-all-pkgs: 'true'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '1'
+          format: json
+          output: ${{ runner.temp }}/ec016-trivy/runner.json
+          hide-progress: 'true'
+          timeout: 10m
+      - name: Comprobar resultados completos del escaner
+        shell: bash
+        run: python3 -m infra.ec016.plan_b_reports
+  integration:
+    needs: scan
+    if: ${{ needs.scan.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8
+        env:
+          POSTGRES_DB: ec016_disposable
+          POSTGRES_USER: ec016_admin
+          POSTGRES_PASSWORD: EC016_SYNTHETIC_ADMIN_ONLY
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8
+        options: >-
+          --tmpfs /var/lib/postgresql/data
+          --memory 768m
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U ec016_admin -d ec016_disposable"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+    steps:
+      - name: Checkout del mismo SHA que aprobo el escaneo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.scan.outputs.lab_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+      - name: Crear fixture sintetica en PostgreSQL nativo
+        id: bootstrap
+        env:
+          EC016_POSTGRES_ID: ${{ job.services.postgres.id }}
+          EC016_NETWORK: ${{ job.services.postgres.network }}
+        run: python3 -m infra.ec016.services bootstrap
+      - name: Iniciar PostgREST despues de crear su rol sin privilegios
+        run: python3 -m infra.ec016.services postgrest
+      - name: Ejecutar exactamente once pruebas sin skips
+        run: python3 -m infra.ec016.services test
+      - name: Limpiar solo PostgREST propio
+        if: ${{ always() && steps.bootstrap.outcome == 'success' }}
+        run: python3 -m infra.ec016.services cleanup

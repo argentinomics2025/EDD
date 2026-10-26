@@ -131,7 +131,7 @@ class ScanOperations(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory,patch.dict(security_gate.os.environ,{'RUNNER_TEMP':directory},clear=True), \
              patch.object(github_runner,'validate_host_context',return_value={}), \
              patch.object(github_runner,'run_lab',side_effect=failure),patch('sys.stdout',output):
-            with self.assertRaises(SystemExit) as exit:github_runner.main()
+            with self.assertRaises(SystemExit) as exit:github_runner.legacy_main()
         self.assertEqual(exit.exception.code,1)
         rows=[json.loads(line) for line in output.getvalue().splitlines() if line.startswith('{')]
         self.assertEqual(rows[-1],{'ec016_stage':'SCAN','status':'FAILED','code':'SCAN_DB_DOWNLOAD',

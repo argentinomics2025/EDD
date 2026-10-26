@@ -28,7 +28,7 @@ class DiagnosticTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory,patch.dict(os.environ,{'RUNNER_TEMP':directory},clear=True), \
              patch.object(hosted,'validate_host_context',return_value={}), \
              patch.object(hosted,'run_lab',side_effect=runner),patch('sys.stdout',stream):
-            with self.assertRaises(SystemExit) as failure:hosted.main()
+            with self.assertRaises(SystemExit) as failure:hosted.legacy_main()
         self.assertEqual(failure.exception.code,1)
         self.assertNotIn(SENTINEL,stream.getvalue())
         return stream.getvalue()
@@ -59,7 +59,7 @@ class DiagnosticTests(unittest.TestCase):
         with patch.dict(os.environ,{},clear=True),patch('sys.stdout',stream), \
              patch.object(hosted.tempfile,'TemporaryDirectory') as directory, \
              patch.object(hosted,'_command') as command:
-            with self.assertRaises(SystemExit):hosted.main()
+            with self.assertRaises(SystemExit):hosted.legacy_main()
         self.assertEqual(records(stream.getvalue())[-1],{'ec016_stage':'CONTEXT','status':'FAILED','code':'HOSTED_CONTEXT'})
         directory.assert_not_called();command.assert_not_called()
 
