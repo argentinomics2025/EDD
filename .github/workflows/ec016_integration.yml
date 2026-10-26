@@ -83,6 +83,7 @@ jobs:
               output.write('sha=' + sha + '\n')
           PY
       - name: Checkout SHA autorizado
+        id: source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ steps.authorization.outputs.sha }}
@@ -98,6 +99,9 @@ jobs:
           curl --fail --silent --show-error --location --retry 3             https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz             -o "$RUNNER_TEMP/ec016-trivy/trivy.tar.gz"
           echo "1816b632dfe529869c740c0913e36bd1629cb7688bd5634f4a858c1d57c88b75  $RUNNER_TEMP/ec016-trivy/trivy.tar.gz" | sha256sum --check --status
           tar -xzf "$RUNNER_TEMP/ec016-trivy/trivy.tar.gz" -C "$RUNNER_TEMP/ec016-trivy" trivy
+          mv "$RUNNER_TEMP/ec016-trivy/trivy" "$RUNNER_TEMP/ec016-trivy/trivy-real"
+          printf '#!/bin/sh\nexec python3 -m infra.ec016.scan_diagnostics run "$@"\n' > "$RUNNER_TEMP/ec016-trivy/trivy"
+          chmod 700 "$RUNNER_TEMP/ec016-trivy/trivy"
           echo "$RUNNER_TEMP/ec016-trivy" >> "$GITHUB_PATH"
           printf '{}\n' > "$RUNNER_TEMP/ec016-trivy/config.yaml"
           : > "$RUNNER_TEMP/ec016-trivy/empty.ignore"
@@ -115,6 +119,9 @@ jobs:
             -t "$EC016_SCAN_RUNNER_TAG" infra/ec016 > "$RUNNER_TEMP/ec016-build.log" 2>&1
           printf 'EC016_SCANNED_RUNNER_ID=%s\n' "$(docker --host unix:///var/run/docker.sock image inspect --format '{{.Id}}' "$EC016_SCAN_RUNNER_TAG")" >> "$GITHUB_ENV"
       - name: Escaneo obligatorio PostgreSQL
+        id: scan_postgresql
+        env:
+          EC016_SCAN_SUBJECT: postgresql
         uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
         with:
           scan-type: image
@@ -133,6 +140,9 @@ jobs:
           hide-progress: 'true'
           timeout: 10m
       - name: Escaneo obligatorio PostgREST
+        id: scan_postgrest
+        env:
+          EC016_SCAN_SUBJECT: postgrest
         uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
         with:
           scan-type: image
@@ -151,6 +161,9 @@ jobs:
           hide-progress: 'true'
           timeout: 10m
       - name: Escaneo obligatorio Python
+        id: scan_python
+        env:
+          EC016_SCAN_SUBJECT: python
         uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
         with:
           scan-type: image
@@ -169,6 +182,9 @@ jobs:
           hide-progress: 'true'
           timeout: 10m
       - name: Escaneo obligatorio Runner y dependencias instaladas
+        id: scan_runner
+        env:
+          EC016_SCAN_SUBJECT: runner
         uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8
         with:
           scan-type: image
@@ -186,9 +202,13 @@ jobs:
           output: ${{ runner.temp }}/ec016-trivy/runner.json
           hide-progress: 'true'
           timeout: 10m
-      - name: Comprobar resultados completos del escaner
+      - name: Diagnostico seguro y cierre obligatorio del escaneo
+        if: ${{ always() && steps.source.outcome == 'success' }}
+        env:
+          EC016_SCAN_OUTCOMES: >-
+            {"postgresql":"${{ steps.scan_postgresql.outcome }}","postgrest":"${{ steps.scan_postgrest.outcome }}","python":"${{ steps.scan_python.outcome }}","runner":"${{ steps.scan_runner.outcome }}"}
         shell: bash
-        run: python3 -m infra.ec016.plan_b_reports
+        run: python3 -m infra.ec016.scan_diagnostics
   integration:
     needs: scan
     if: ${{ needs.scan.result == 'success' }}
