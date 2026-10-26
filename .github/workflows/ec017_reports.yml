@@ -1,0 +1,117 @@
+name: EC-017 eight security reports - NO PRODUCCION
+
+on:
+  workflow_dispatch:
+    inputs:
+      lab_sha:
+        description: 'SHA completo revisado del laboratorio (40 caracteres hexadecimales)'
+        required: true
+        type: string
+      confirmation:
+        description: 'Escribir EC016_DISPOSABLE_ONLY: seguido del mismo SHA completo'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ec017-report-collection
+  cancel-in-progress: false
+
+env:
+  EC016_GITHUB_DISPOSABLE: EC016_DISPOSABLE_ONLY
+  EC016_SOURCE_SHA: ${{ inputs.lab_sha }}
+  EC016_MANUAL_CONFIRMATION: ${{ inputs.confirmation }}
+  EC016_APPROVED_SHA: ${{ vars.EC016_APPROVED_SHA }}
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  reports:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'argentinomics2025/EDD' &&
+      github.event.repository.private == false &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      # Trusted policy lives ONLY in main; no experimental checkout before this step.
+      # Single-operator authorization, deliberately NOT a simulated second review.
+      - name: Autorizar SHA exacto antes de descargar codigo experimental
+        id: authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, sys
+          e = os.environ
+          sha = e.get('EC016_SOURCE_SHA', '')
+          approved = e.get('EC016_APPROVED_SHA', '')
+          with open(e['GITHUB_EVENT_PATH']) as event_file:
+              event = json.load(event_file)
+          fixed = {
+              'GITHUB_ACTIONS': 'true',
+              'GITHUB_EVENT_NAME': 'workflow_dispatch',
+              'GITHUB_REPOSITORY': 'argentinomics2025/EDD',
+              'GITHUB_REF': 'refs/heads/main',
+              'GITHUB_WORKFLOW_REF': 'argentinomics2025/EDD/.github/workflows/ec017_reports.yml@refs/heads/main',
+              'RUNNER_ENVIRONMENT': 'github-hosted',
+              'RUNNER_OS': 'Linux', 'RUNNER_ARCH': 'X64', 'ImageOS': 'ubuntu24',
+          }
+          valid = (
+              all(e.get(k) == v for k, v in fixed.items())
+              and e.get('GITHUB_RUN_ATTEMPT') == '1'
+              and re.fullmatch('[a-f0-9]{40}', sha) is not None
+              and sha == approved
+              and e.get('EC016_MANUAL_CONFIRMATION') == 'EC016_DISPOSABLE_ONLY:' + sha
+              and event.get('repository', {}).get('private') is False
+              and event.get('repository', {}).get('full_name') == 'argentinomics2025/EDD'
+              and event.get('inputs', {}).get('lab_sha') == sha
+              and event.get('inputs', {}).get('confirmation') == 'EC016_DISPOSABLE_ONLY:' + sha
+          )
+          if not valid:
+              sys.exit('EC016_DENIED: contexto o autorizacion de SHA invalida; no se descarga el laboratorio.')
+          with open(e['GITHUB_OUTPUT'], 'a') as output:
+              output.write('sha=' + sha + '\n')
+          PY
+      - name: Checkout SHA autorizado
+        id: source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ steps.authorization.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+      - name: Instalar binario Trivy verificado y preparar politica vacia
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/ec017-trivy"
+          curl --fail --silent --show-error --location --retry 3             https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz             -o "$RUNNER_TEMP/ec017-trivy/trivy.tar.gz"
+          echo "1816b632dfe529869c740c0913e36bd1629cb7688bd5634f4a858c1d57c88b75  $RUNNER_TEMP/ec017-trivy/trivy.tar.gz" | sha256sum --check --status
+          tar -xzf "$RUNNER_TEMP/ec017-trivy/trivy.tar.gz" -C "$RUNNER_TEMP/ec017-trivy" trivy
+          printf '{}\n' > "$RUNNER_TEMP/ec017-trivy/config.yaml"
+          : > "$RUNNER_TEMP/ec017-trivy/empty.ignore"
+      - name: Checkout baseline original inmutable (sin ejecutar sus robots)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 922c1fc5094c485bce97a2d8f3c044381efcb188
+          path: ec017-original
+          persist-credentials: false
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+      - name: Recoger ocho reportes y exigir gate candidato sin excepciones
+        id: collection
+        run: python3 -m infra.ec017.collect_reports
+      - name: Conservar exclusivamente JSON incluso ante hallazgos bloqueantes
+        if: ${{ always() && steps.collection.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ec017-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ec017-trivy/evidence/*.json
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: false

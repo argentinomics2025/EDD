@@ -19,12 +19,13 @@ REPOSITORY='argentinomics2025/EDD'
 REF='refs/heads/main'
 WORKFLOW=REPOSITORY+'/.github/workflows/ec016_integration.yml@'+REF
 FUNCTIONAL_WORKFLOW=REPOSITORY+'/.github/workflows/ec016_functional.yml@'+REF
+REPORT_WORKFLOW=REPOSITORY+'/.github/workflows/ec017_reports.yml@'+REF
 SOCKET='unix:///var/run/docker.sock'
 ACK='EC016_DISPOSABLE_ONLY'
 
 
 def validate_host_context(environment=None, event=None, *, workflow=WORKFLOW):
-    if workflow not in (WORKFLOW,FUNCTIONAL_WORKFLOW):fail('CONTEXT','WORKFLOW_IDENTITY')
+    if workflow not in (WORKFLOW,FUNCTIONAL_WORKFLOW,REPORT_WORKFLOW):fail('CONTEXT','WORKFLOW_IDENTITY')
     e=os.environ if environment is None else environment
     fixed={'GITHUB_ACTIONS':'true','GITHUB_EVENT_NAME':'workflow_dispatch',
            'GITHUB_REPOSITORY':REPOSITORY,'GITHUB_REF':REF,'GITHUB_WORKFLOW_REF':workflow,

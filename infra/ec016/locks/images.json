@@ -3,14 +3,14 @@
   "images": {
     "postgres": {
       "repository": "library/postgres",
-      "tag": "16.14-bookworm",
-      "digest": "sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8",
-      "verified_at": "2026-10-24T17:38:16.955481+00:00",
+      "tag": "16.15-bookworm",
+      "digest": "sha256:d81f7b51697014367236d07ec58b54153fc28f828b72bf247fe5c7487520bcb0",
+      "verified_at": "2026-10-26T23:45:53.893994+00:00",
       "status": "manifest_digest_verified",
-      "manifest_url": "https://registry-1.docker.io/v2/library/postgres/manifests/16.14-bookworm",
+      "manifest_url": "https://registry-1.docker.io/v2/library/postgres/manifests/16.15-bookworm",
       "manifest_file": "postgres-manifest.json",
-      "amd64_manifest_digest": "sha256:714b08dd70c05160db032e4321033ac4e5b6328935b2d03ed419c3a898aa8219",
-      "reference": "docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8"
+      "amd64_manifest_digest": "sha256:e92e17ca202da4bb205f6f4a6c8cb30539edfbaa04987b506630f5d5851ff3c8",
+      "reference": "docker.io/library/postgres:16.15-bookworm@sha256:d81f7b51697014367236d07ec58b54153fc28f828b72bf247fe5c7487520bcb0"
     },
     "postgrest": {
       "repository": "postgrest/postgrest",

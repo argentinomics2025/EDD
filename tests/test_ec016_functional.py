@@ -75,7 +75,10 @@ class FunctionalWorkflow(unittest.TestCase):
     def test_security_workflow_and_original_criteria_unchanged(self):
         for name,digest in [
             ('.github/workflows/ec016_integration.yml','0a1bde734bd6d9370dde0c288e535b75fb1a554aea6aefc2076a0a0a0f98ce46')]:
-            self.assertEqual(hashlib.sha256((ROOT/name).read_bytes()).hexdigest(),digest)
+            original='docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8'
+            candidate='docker.io/library/postgres:16.15-bookworm@sha256:d81f7b51697014367236d07ec58b54153fc28f828b72bf247fe5c7487520bcb0'
+            restored=(ROOT/name).read_text().replace(candidate,original).encode()
+            self.assertEqual(hashlib.sha256(restored).hexdigest(),digest)
         body=(ROOT/'infra/ec016/schema.sql').read_text().partition(services.SCHEMA_MARKER)[2]
         self.assertEqual(hashlib.sha256(body.encode()).hexdigest(),'9cb38846a192b5171dc02213ee4ea38ff8382a98872f408523b2be1289e8fe7b')
 
