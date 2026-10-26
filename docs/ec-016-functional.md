@@ -46,8 +46,9 @@ repetir el escaneo fail-closed y las pruebas; esta ejecución no reemplaza eso.
   y aceptación de riesgo; checkout de commit inmutable sin credenciales persistidas.
 - contents:read, sin secrets/PAT/OIDC/DSN productivo; no producción ni Supabase.
 - PostgreSQL nativo sin puertos ni volúmenes persistentes; datos en tmpfs. GitHub
-  inicia el service antes de los pasos de autorización; no se ejecuta fixture ni
-  código experimental antes de validar SHA. Es una limitación nativa explícita.
+  crea el service sólo en el segundo job, después de que el job authorize (sin
+  contenedores ni checkout) valide contexto, rama, SHA y aceptación del riesgo.
+  functional exige needs:authorize y resultado success; utiliza el SHA de su output.
 - El mismo helper existente verifica ID/imagen/red privada y marcador de ejecución;
   bootstrap sólo por exec al ID nativo; PostgREST usa rol sintético sin privilegios.
 - Tests en contenedor sin socket Docker, sin token ni repositorio completo, mounts
@@ -79,7 +80,7 @@ las imágenes vulnerables, como corresponde. El nuevo archivo debe estar registr
 en main para workflow_dispatch. Ninguna de estas acciones se ejecutó durante esta
 preparación. No se afirma que las once pruebas reales hayan pasado o comenzado.
 
-Validación local: 223 pruebas sin SQL aprobadas en Python 3.10 y 3.12, cero fallos.
+Validación local: 224 pruebas sin SQL aprobadas en Python 3.10 y 3.12, cero fallos.
 Actionlint, AST Python, YAML y Bash -n, y git diff --check aprobados. La suite y
 el cuerpo SQL mantienen sus hashes anteriores; el workflow de seguridad también.
 El bloqueo incondicional de escritura de los robots permanece sin cambios.

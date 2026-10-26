@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -21,7 +22,7 @@ class FunctionalWorkflow(unittest.TestCase):
         trigger=w.get('on',w.get(True))
         self.assertEqual(set(trigger),{'workflow_dispatch'})
         self.assertEqual(w['permissions'],{'contents':'read'})
-        self.assertEqual(set(w['jobs']),{'functional'})
+        self.assertEqual(set(w['jobs']),{'authorize','functional'})
         job=w['jobs']['functional']
         self.assertEqual(job['runs-on'],'ubuntu-24.04')
         self.assertEqual(set(job['services']),{'postgres'})
@@ -30,11 +31,45 @@ class FunctionalWorkflow(unittest.TestCase):
         for forbidden in ('secrets.', 'continue-on-error', 'trivy-action', 'self-hosted', 'upload-artifact'):
             self.assertNotIn(forbidden,raw)
         self.assertIn('EC016_FUNCTIONAL_ONLY_ACCEPT_IMAGE_RISK',raw)
-        steps=job['steps']
+        authorization=w['jobs']['authorize']
+        self.assertNotIn('services',authorization)
+        self.assertNotIn('container',authorization)
+        self.assertEqual(authorization['runs-on'],'ubuntu-24.04')
+        self.assertEqual(job['needs'],'authorize')
+        self.assertEqual(job['if'],"${{ needs.authorize.result == 'success' }}")
+        self.assertEqual(job['steps'][0]['with']['ref'], '${{ needs.authorize.outputs.lab_sha }}')
+        steps=authorization['steps']
+        self.assertEqual(len(steps),1)
         self.assertEqual(steps[0]['id'],'authorization')
         self.assertIn('sha == approved',steps[0]['run'])
         self.assertIn("event.get('inputs', {}).get('image_risk')",steps[0]['run'])
-        self.assertIn('services test',steps[-2]['run'])
+        self.assertIn('services test',job['steps'][-2]['run'])
+
+    def test_authorization_rejects_bad_sha_branch_context_and_risk_before_service_job(self):
+        job=self.workflow()['jobs']['authorize']
+        script=job['steps'][0]['run'].split("python3 - <<'PY'\n",1)[1].rsplit('\nPY',1)[0]
+        sha='a'*40
+        with tempfile.TemporaryDirectory() as directory:
+            event=Path(directory)/'event.json';output=Path(directory)/'output'
+            event.write_text(json.dumps({'repository':{'private':False,'full_name':'argentinomics2025/EDD'},
+                'inputs':{'lab_sha':sha,'confirmation':'EC016_DISPOSABLE_ONLY:'+sha,
+                          'image_risk':'EC016_FUNCTIONAL_ONLY_ACCEPT_IMAGE_RISK'}}))
+            env={'GITHUB_ACTIONS':'true','GITHUB_EVENT_NAME':'workflow_dispatch',
+                'GITHUB_REPOSITORY':'argentinomics2025/EDD','GITHUB_REF':'refs/heads/main',
+                'GITHUB_WORKFLOW_REF':github_runner.FUNCTIONAL_WORKFLOW,
+                'RUNNER_ENVIRONMENT':'github-hosted','RUNNER_OS':'Linux','RUNNER_ARCH':'X64','ImageOS':'ubuntu24',
+                'GITHUB_RUN_ATTEMPT':'1','EC016_SOURCE_SHA':sha,'EC016_APPROVED_SHA':sha,
+                'EC016_MANUAL_CONFIRMATION':'EC016_DISPOSABLE_ONLY:'+sha,
+                'EC016_FUNCTIONAL_RISK':'EC016_FUNCTIONAL_ONLY_ACCEPT_IMAGE_RISK',
+                'GITHUB_EVENT_PATH':str(event),'GITHUB_OUTPUT':str(output)}
+            with patch.dict(os.environ,env,clear=True):exec(compile(script,'authorization','exec'),{})
+            self.assertEqual(output.read_text(),'sha='+sha+'\n')
+            for key,value in [('EC016_APPROVED_SHA','b'*40),('GITHUB_REF','refs/heads/test'),
+                              ('RUNNER_ENVIRONMENT','self-hosted'),('EC016_FUNCTIONAL_RISK','')]:
+                output.unlink(missing_ok=True)
+                with self.subTest(key=key),patch.dict(os.environ,dict(env,**{key:value}),clear=True):
+                    with self.assertRaises(SystemExit):exec(compile(script,'authorization','exec'),{})
+                self.assertFalse(output.exists())
 
     def test_security_workflow_and_original_criteria_unchanged(self):
         for name,digest in [

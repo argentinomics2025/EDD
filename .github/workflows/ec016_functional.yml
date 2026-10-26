@@ -36,27 +36,16 @@ env:
   EC016_PYTHON_IMAGE: docker.io/library/python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
 
 jobs:
-  functional:
+  authorize:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.repository == 'argentinomics2025/EDD' &&
       github.event.repository.private == false &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8
-        env:
-          POSTGRES_DB: ec016_disposable
-          POSTGRES_USER: ec016_admin
-          POSTGRES_PASSWORD: EC016_SYNTHETIC_ADMIN_ONLY
-          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8
-        options: >-
-          --tmpfs /var/lib/postgresql/data
-          --memory 768m
-          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U ec016_admin -d ec016_disposable"
-          --health-interval 2s --health-timeout 2s --health-retries 30
+    timeout-minutes: 5
+    outputs:
+      lab_sha: ${{ steps.authorization.outputs.sha }}
     steps:
       # Trusted policy lives ONLY in main; no experimental checkout before this step.
       # Single-operator authorization, deliberately NOT a simulated second review.
@@ -99,11 +88,30 @@ jobs:
           with open(e['GITHUB_OUTPUT'], 'a') as output:
               output.write('sha=' + sha + '\n')
           PY
+  functional:
+    needs: authorize
+    if: ${{ needs.authorize.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8
+        env:
+          POSTGRES_DB: ec016_disposable
+          POSTGRES_USER: ec016_admin
+          POSTGRES_PASSWORD: EC016_SYNTHETIC_ADMIN_ONLY
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8
+        options: >-
+          --tmpfs /var/lib/postgresql/data
+          --memory 768m
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U ec016_admin -d ec016_disposable"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+    steps:
       - name: Checkout SHA autorizado
         id: source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ steps.authorization.outputs.sha }}
+          ref: ${{ needs.authorize.outputs.lab_sha }}
           persist-credentials: false
           fetch-depth: 1
           submodules: false
