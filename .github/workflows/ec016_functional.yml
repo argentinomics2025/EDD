@@ -1,0 +1,123 @@
+name: EC-016 functional only - NOT SECURITY CERTIFIED - NO PRODUCCION
+
+on:
+  workflow_dispatch:
+    inputs:
+      lab_sha:
+        description: 'SHA completo revisado del laboratorio (40 caracteres hexadecimales)'
+        required: true
+        type: string
+      confirmation:
+        description: 'Escribir EC016_DISPOSABLE_ONLY: seguido del mismo SHA completo'
+        required: true
+        type: string
+
+      image_risk:
+        description: 'Escribir EC016_FUNCTIONAL_ONLY_ACCEPT_IMAGE_RISK (PostgreSQL: 16 CRITICAL, 116 HIGH)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ec016-functional-laboratory
+  cancel-in-progress: false
+
+env:
+  EC016_GITHUB_DISPOSABLE: EC016_DISPOSABLE_ONLY
+  EC016_SOURCE_SHA: ${{ inputs.lab_sha }}
+  EC016_MANUAL_CONFIRMATION: ${{ inputs.confirmation }}
+  EC016_APPROVED_SHA: ${{ vars.EC016_APPROVED_SHA }}
+  EC016_FUNCTIONAL_RISK: ${{ inputs.image_risk }}
+  PYTHONDONTWRITEBYTECODE: '1'
+  EC016_POSTGRES_IMAGE: docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8
+  EC016_POSTGREST_IMAGE: docker.io/postgrest/postgrest:v12.2.12@sha256:5f4ce744539bbba786b4e24dbbd95bdb2a956dcf568c5374995a0ff4a68f5bd2
+  EC016_PYTHON_IMAGE: docker.io/library/python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
+
+jobs:
+  functional:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'argentinomics2025/EDD' &&
+      github.event.repository.private == false &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8
+        env:
+          POSTGRES_DB: ec016_disposable
+          POSTGRES_USER: ec016_admin
+          POSTGRES_PASSWORD: EC016_SYNTHETIC_ADMIN_ONLY
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8
+        options: >-
+          --tmpfs /var/lib/postgresql/data
+          --memory 768m
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U ec016_admin -d ec016_disposable"
+          --health-interval 2s --health-timeout 2s --health-retries 30
+    steps:
+      # Trusted policy lives ONLY in main; no experimental checkout before this step.
+      # Single-operator authorization, deliberately NOT a simulated second review.
+      - name: Autorizar SHA exacto antes de descargar codigo experimental
+        id: authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, sys
+          e = os.environ
+          sha = e.get('EC016_SOURCE_SHA', '')
+          approved = e.get('EC016_APPROVED_SHA', '')
+          with open(e['GITHUB_EVENT_PATH']) as event_file:
+              event = json.load(event_file)
+          fixed = {
+              'GITHUB_ACTIONS': 'true',
+              'GITHUB_EVENT_NAME': 'workflow_dispatch',
+              'GITHUB_REPOSITORY': 'argentinomics2025/EDD',
+              'GITHUB_REF': 'refs/heads/main',
+              'GITHUB_WORKFLOW_REF': 'argentinomics2025/EDD/.github/workflows/ec016_functional.yml@refs/heads/main',
+              'RUNNER_ENVIRONMENT': 'github-hosted',
+              'RUNNER_OS': 'Linux', 'RUNNER_ARCH': 'X64', 'ImageOS': 'ubuntu24',
+          }
+          valid = (
+              all(e.get(k) == v for k, v in fixed.items())
+              and e.get('GITHUB_RUN_ATTEMPT') == '1'
+              and e.get('EC016_FUNCTIONAL_RISK') == 'EC016_FUNCTIONAL_ONLY_ACCEPT_IMAGE_RISK'
+              and event.get('inputs', {}).get('image_risk') == 'EC016_FUNCTIONAL_ONLY_ACCEPT_IMAGE_RISK'
+              and re.fullmatch('[a-f0-9]{40}', sha) is not None
+              and sha == approved
+              and e.get('EC016_MANUAL_CONFIRMATION') == 'EC016_DISPOSABLE_ONLY:' + sha
+              and event.get('repository', {}).get('private') is False
+              and event.get('repository', {}).get('full_name') == 'argentinomics2025/EDD'
+              and event.get('inputs', {}).get('lab_sha') == sha
+              and event.get('inputs', {}).get('confirmation') == 'EC016_DISPOSABLE_ONLY:' + sha
+          )
+          if not valid:
+              sys.exit('EC016_DENIED: contexto o autorizacion de SHA invalida; no se descarga el laboratorio.')
+          with open(e['GITHUB_OUTPUT'], 'a') as output:
+              output.write('sha=' + sha + '\n')
+          PY
+      - name: Checkout SHA autorizado
+        id: source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ steps.authorization.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+      - name: Crear fixture sintetica en PostgreSQL nativo
+        id: bootstrap
+        env:
+          EC016_POSTGRES_ID: ${{ job.services.postgres.id }}
+          EC016_NETWORK: ${{ job.services.postgres.network }}
+        run: python3 -m infra.ec016.services bootstrap
+      - name: Iniciar PostgREST despues de crear su rol sin privilegios
+        run: python3 -m infra.ec016.services postgrest
+      - name: Ejecutar exactamente once pruebas sin skips
+        run: python3 -m infra.ec016.services test
+      - name: Limpiar solo PostgREST propio
+        if: ${{ always() && steps.bootstrap.outcome == 'success' }}
+        run: python3 -m infra.ec016.services cleanup

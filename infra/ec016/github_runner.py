@@ -18,14 +18,16 @@ from .diagnostics import Failure, classify, emit, fail, operation, stage
 REPOSITORY='argentinomics2025/EDD'
 REF='refs/heads/main'
 WORKFLOW=REPOSITORY+'/.github/workflows/ec016_integration.yml@'+REF
+FUNCTIONAL_WORKFLOW=REPOSITORY+'/.github/workflows/ec016_functional.yml@'+REF
 SOCKET='unix:///var/run/docker.sock'
 ACK='EC016_DISPOSABLE_ONLY'
 
 
-def validate_host_context(environment=None, event=None):
+def validate_host_context(environment=None, event=None, *, workflow=WORKFLOW):
+    if workflow not in (WORKFLOW,FUNCTIONAL_WORKFLOW):fail('CONTEXT','WORKFLOW_IDENTITY')
     e=os.environ if environment is None else environment
     fixed={'GITHUB_ACTIONS':'true','GITHUB_EVENT_NAME':'workflow_dispatch',
-           'GITHUB_REPOSITORY':REPOSITORY,'GITHUB_REF':REF,'GITHUB_WORKFLOW_REF':WORKFLOW,
+           'GITHUB_REPOSITORY':REPOSITORY,'GITHUB_REF':REF,'GITHUB_WORKFLOW_REF':workflow,
            'RUNNER_ENVIRONMENT':'github-hosted','RUNNER_OS':'Linux','RUNNER_ARCH':'X64',
            'ImageOS':'ubuntu24','EC016_GITHUB_DISPOSABLE':ACK}
     if any(e.get(k)!=v for k,v in fixed.items()):fail('CONTEXT','HOSTED_CONTEXT')
@@ -51,7 +53,7 @@ def validate_host_context(environment=None, event=None):
     if (not re.fullmatch('[a-f0-9]{40}',source) or source!=e.get('EC016_APPROVED_SHA')
             or e.get('EC016_MANUAL_CONFIRMATION')!=ACK+':'+source):
         fail('CONTEXT','AUTHORIZED_SHA')
-    return {'provider':'github-hosted','repository':REPOSITORY,'workflow_ref':WORKFLOW,
+    return {'provider':'github-hosted','repository':REPOSITORY,'workflow_ref':workflow,
             'run_id':e['GITHUB_RUN_ID'],'run_attempt':e['GITHUB_RUN_ATTEMPT'],
             'workspace':e['GITHUB_WORKSPACE'],'workflow_sha':e['GITHUB_SHA'],'source_sha':source}
 

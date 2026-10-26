@@ -37,8 +37,18 @@ def validate_context(data):
 
 
 def host_context():
-    from .github_runner import validate_host_context
-    result=validate_host_context()
+    from .github_runner import validate_host_context, WORKFLOW, FUNCTIONAL_WORKFLOW
+    workflow=os.environ.get('GITHUB_WORKFLOW_REF')
+    if workflow==FUNCTIONAL_WORKFLOW:
+        # Explicit risk acceptance is limited to this functional workflow/run/SHA.
+        event=json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+        acknowledgement='EC016_FUNCTIONAL_ONLY_ACCEPT_IMAGE_RISK'
+        if (os.environ.get('EC016_FUNCTIONAL_RISK')!=acknowledgement
+                or event.get('inputs',{}).get('image_risk')!=acknowledgement):
+            raise RuntimeError('Image risk not accepted')
+        result=validate_host_context(workflow=FUNCTIONAL_WORKFLOW)
+    else:
+        result=validate_host_context(workflow=WORKFLOW)
     expected=policy.verify_images(ROOT)
     for key,name in [('EC016_POSTGRES_IMAGE','postgres'),('EC016_POSTGREST_IMAGE','postgrest'),('EC016_PYTHON_IMAGE','python')]:
         if os.environ.get(key)!=expected[name]:raise RuntimeError('Workflow image differs from reviewed lock')
