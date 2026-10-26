@@ -118,8 +118,34 @@ def admin_connection():
     except Exception as error:raise StartupError('SETUP_IDENTITY') from error
     try:
         import psycopg
-        connection=psycopg.connect(**db_parameters(),autocommit=True)
-    except Exception as error:raise StartupError('SETUP_POSTGRES_CONNECTION') from error
+    except Exception as error:raise StartupError('SETUP_POSTGRES_IMPORT') from error
+    parameters=db_parameters()
+    expected=manifest.get('postgres_ip',DB_HOST)
+    try:
+        address=socket.gethostbyname(parameters['host'])
+    except Exception as error:raise StartupError('SETUP_POSTGRES_DNS') from error
+    if address!=expected:
+        raise StartupError('SETUP_IDENTITY')
+    # Pin the validated address: no second DNS lookup or arbitrary destination.
+    parameters['hostaddr']=address
+    try:
+        with socket.create_connection((address,5432),timeout=3):pass
+    except Exception as error:raise StartupError('SETUP_POSTGRES_TCP') from error
+    try:
+        connection=psycopg.connect(**parameters,autocommit=True)
+    except Exception as error:
+        # libpq connect failures may have no SQLSTATE. Classify narrowly using
+        # private text; never publish it, its values, or exception attributes.
+        state=getattr(error,'sqlstate',None)
+        message=str(error).lower()
+        if state in ('28P01','28000') or any(x in message for x in (
+                'password authentication failed', 'no password supplied',
+                'no pg_hba.conf entry', 'role "ec016_admin" does not exist')):
+            code='SETUP_POSTGRES_AUTH'
+        elif state=='3D000' or 'database "ec016_disposable" does not exist' in message:
+            code='SETUP_POSTGRES_DATABASE'
+        else:code='SETUP_POSTGRES_HANDSHAKE'
+        raise StartupError(code) from error
     try:
         try:
             row=connection.execute("SELECT current_database(),current_user,(SELECT jsonb_build_object('scope',value,'run_id',run_id,'owner_token',owner_token) FROM api.ec016_metadata WHERE name='scope')").fetchone()

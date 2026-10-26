@@ -1,5 +1,7 @@
 """Fixed, non-sensitive setup failure categories; never serialize exceptions."""
 CODES = frozenset({'SETUP_POSTGRES_CONNECTION', 'SETUP_POSTGREST_UNAVAILABLE',
+                   'SETUP_POSTGRES_IMPORT', 'SETUP_POSTGRES_DNS', 'SETUP_POSTGRES_TCP',
+                   'SETUP_POSTGRES_AUTH', 'SETUP_POSTGRES_DATABASE', 'SETUP_POSTGRES_HANDSHAKE',
                    'SETUP_SDK', 'SETUP_METADATA_QUERY', 'SETUP_IDENTITY', 'SETUP_SESSION_CLOSE'})
 
 

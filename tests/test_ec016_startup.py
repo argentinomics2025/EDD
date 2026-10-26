@@ -56,7 +56,10 @@ class StartupTests(unittest.TestCase):
     def test_admin_query_identity_failure_closes_connection_without_real_sql(self):
         connection=Mock();connection.execute.side_effect=RuntimeError('SENSITIVE_SENTINEL')
         psycopg=types.SimpleNamespace(connect=Mock(return_value=connection))
-        with patch.dict(sys.modules,{'psycopg':psycopg}),patch.object(lab_guard,'runtime_context',return_value={}):
+        with patch.dict(sys.modules,{'psycopg':psycopg}),patch.object(lab_guard,'runtime_context',return_value={}), \
+             patch.object(lab_guard.socket,'gethostbyname',return_value=lab_guard.DB_HOST), \
+             patch.object(lab_guard.socket,'create_connection'):
+
             with self.assertRaises(StartupError) as caught:lab_guard.admin_connection()
         self.assertEqual(caught.exception.code,'SETUP_METADATA_QUERY')
         connection.close.assert_called_once()
