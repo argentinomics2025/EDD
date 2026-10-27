@@ -3,14 +3,14 @@
   "images": {
     "postgres": {
       "repository": "library/postgres",
-      "tag": "16.15-bookworm",
-      "digest": "sha256:d81f7b51697014367236d07ec58b54153fc28f828b72bf247fe5c7487520bcb0",
-      "verified_at": "2026-10-26T23:45:53.893994+00:00",
+      "tag": "16.15-trixie",
+      "digest": "sha256:9e2cf6287f25c3151f4c9421ccce2b17f3e60061c111a29165e0d2cdd9ff0a97",
+      "verified_at": "2026-10-27T00:16:57.739524+00:00",
       "status": "manifest_digest_verified",
-      "manifest_url": "https://registry-1.docker.io/v2/library/postgres/manifests/16.15-bookworm",
+      "manifest_url": "https://registry-1.docker.io/v2/library/postgres/manifests/16.15-trixie",
       "manifest_file": "postgres-manifest.json",
-      "amd64_manifest_digest": "sha256:e92e17ca202da4bb205f6f4a6c8cb30539edfbaa04987b506630f5d5851ff3c8",
-      "reference": "docker.io/library/postgres:16.15-bookworm@sha256:d81f7b51697014367236d07ec58b54153fc28f828b72bf247fe5c7487520bcb0"
+      "amd64_manifest_digest": "sha256:f9d1e581cde3e4c8bc696b07e6f7b7aea1d41014b33a52b27990762daae61beb",
+      "reference": "docker.io/library/postgres:16.15-trixie@sha256:9e2cf6287f25c3151f4c9421ccce2b17f3e60061c111a29165e0d2cdd9ff0a97"
     },
     "postgrest": {
       "repository": "postgrest/postgrest",
@@ -25,14 +25,14 @@
     },
     "python": {
       "repository": "library/python",
-      "tag": "3.12.14-slim-bookworm",
-      "digest": "sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e",
-      "verified_at": "2026-10-24T17:38:16.858204+00:00",
+      "tag": "3.12.14-slim-trixie",
+      "digest": "sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f",
+      "verified_at": "2026-10-27T00:16:59.028786+00:00",
       "status": "manifest_digest_verified",
-      "manifest_url": "https://registry-1.docker.io/v2/library/python/manifests/3.12.14-slim-bookworm",
+      "manifest_url": "https://registry-1.docker.io/v2/library/python/manifests/3.12.14-slim-trixie",
       "manifest_file": "python-manifest.json",
-      "amd64_manifest_digest": "sha256:1aaa65a85fda306ffb8b910824d4e93bdce61e212c7e87168123ea3073b41a1a",
-      "reference": "docker.io/library/python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e"
+      "amd64_manifest_digest": "sha256:44ff437bba879d4941b710a369a8f19266aea34b29002807f0c487fabc9eec9b",
+      "reference": "docker.io/library/python:3.12.14-slim-trixie@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f"
     }
   }
 }

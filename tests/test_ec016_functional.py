@@ -76,8 +76,10 @@ class FunctionalWorkflow(unittest.TestCase):
         for name,digest in [
             ('.github/workflows/ec016_integration.yml','0a1bde734bd6d9370dde0c288e535b75fb1a554aea6aefc2076a0a0a0f98ce46')]:
             original='docker.io/library/postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8'
-            candidate='docker.io/library/postgres:16.15-bookworm@sha256:d81f7b51697014367236d07ec58b54153fc28f828b72bf247fe5c7487520bcb0'
-            restored=(ROOT/name).read_text().replace(candidate,original).encode()
+            candidate='docker.io/library/postgres:16.15-trixie@sha256:9e2cf6287f25c3151f4c9421ccce2b17f3e60061c111a29165e0d2cdd9ff0a97'
+            python_original='docker.io/library/python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e'
+            python_candidate='docker.io/library/python:3.12.14-slim-trixie@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f'
+            restored=(ROOT/name).read_text().replace(candidate,original).replace(python_candidate,python_original).encode()
             self.assertEqual(hashlib.sha256(restored).hexdigest(),digest)
         body=(ROOT/'infra/ec016/schema.sql').read_text().partition(services.SCHEMA_MARKER)[2]
         self.assertEqual(hashlib.sha256(body.encode()).hexdigest(),'9cb38846a192b5171dc02213ee4ea38ff8382a98872f408523b2be1289e8fe7b')

@@ -63,6 +63,39 @@ def review(report, image_id, *, inventory_gap=False):
     return {'packages':packages,'inventory_unavailable':not packages,**counts}
 
 
+def assets(report):
+    """Observed package versions, not an assertion of exploitability or coverage."""
+    observed=[]
+    for result in report.get('Results') or []:
+        gosu=(result.get('Type')=='gobinary' and result.get('Target','').split('/')[-1]=='gosu')
+        for package in result.get('Packages') or []:
+            name=package.get('Name','')
+            if gosu or name in ('libpq5','libssl3','libssl3t64','openssl','psycopg-binary','pydantic_core','pydantic-core'):
+                observed.append({'asset':'gosu' if gosu else result.get('Type'),
+                                 'package':name,'version':package.get('Version')})
+    return {'observed':observed,'gosu_found':any(x['asset']=='gosu' for x in observed),
+            'empty_inventory':not any(r.get('Packages') for r in report.get('Results') or [])}
+
+
+def native_inventory(checkout, evidence, group, reference):
+    probe=checkout/'infra/ec017/dependency_probe.py'
+    raw=docker(['run','--rm','--network','none','--read-only','--cap-drop','ALL',
+                '--security-opt','no-new-privileges:true','--user','10001:10001',
+                '--memory','256m','--cpus','1','--pids-limit','64',
+                '--env','PYTHONDONTWRITEBYTECODE=1',
+                '--mount','type=bind,src='+str(probe)+',dst=/ec017-probe.py,readonly',
+                reference,'python','/ec017-probe.py'])
+    data=json.loads(raw)
+    if (set(data)!={'psycopg','psycopg_binary','implementation','libpq_version',
+                    'openssl_version','private_libraries','extensions','transitive_advisory_coverage'}
+            or data.get('transitive_advisory_coverage')!='not_established'
+            or data.get('implementation')!='binary' or type(data.get('libpq_version')) is not int
+            or not data.get('openssl_version') or not data.get('private_libraries')):
+        raise ValueError('Incomplete native inventory')
+    output=evidence/(group+'-runner-native.json');output.write_text(json.dumps(data,indent=2)+'\n')
+    return {'file':output.name,'sha256':digest(output),'probe_sha256':digest(probe)}
+
+
 def scan(root, evidence, group, name, reference, image_id):
     report=evidence/(group+'-'+name+'.json')
     run=command([str(root/'trivy'),'image','--cache-dir',str(root/'cache'),
@@ -76,7 +109,9 @@ def scan(root, evidence, group, name, reference, image_id):
     if report.is_file():
         record['report_sha256']=digest(report)
         try:
-            record['findings']=review(json.loads(report.read_text()),image_id,inventory_gap=name=='postgrest')
+            data=json.loads(report.read_text())
+            record['findings']=review(data,image_id,inventory_gap=name=='postgrest')
+            record['assets']=assets(data)
             db=root/'cache/db/metadata.json'
             metadata=json.loads(db.read_text());validate_database(metadata)
             record['database']=metadata
@@ -137,6 +172,8 @@ def main():
                 record.update(scan(root,evidence,group,name,reference,image_id))
                 record.update(provenance,reference=reference,image_id=image_id,
                     source_sha=BASELINE if group=='original' else binding['source_sha'])
+                if name=='runner':
+                    record['native_inventory']=native_inventory(checkout,evidence,group,reference)
             except Exception:
                 record['complete']=False
             records.append(record)

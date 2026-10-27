@@ -44,10 +44,10 @@ class Reports(unittest.TestCase):
         baseline=next(s for s in steps if s.get('with',{}).get('path')=='ec017-original')
         self.assertEqual(baseline['with']['ref'],reports.BASELINE)
 
-    def test_candidate_changes_only_postgres_version_and_verified_receipt(self):
+    def test_authorized_trixie_candidates_and_verified_receipts(self):
         refs=policy.verify_images(ROOT/'infra/ec016')
-        self.assertEqual(refs['postgres'],'docker.io/library/postgres:16.15-bookworm@sha256:d81f7b51697014367236d07ec58b54153fc28f828b72bf247fe5c7487520bcb0')
-        self.assertEqual(refs['python'],'docker.io/library/python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e')
+        self.assertEqual(refs['postgres'],'docker.io/library/postgres:16.15-trixie@sha256:9e2cf6287f25c3151f4c9421ccce2b17f3e60061c111a29165e0d2cdd9ff0a97')
+        self.assertEqual(refs['python'],'docker.io/library/python:3.12.14-slim-trixie@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f')
         self.assertEqual(refs['postgrest'],'docker.io/postgrest/postgrest:v12.2.12@sha256:5f4ce744539bbba786b4e24dbbd95bdb2a956dcf568c5374995a0ff4a68f5bd2')
 
     def test_report_requires_identity_inventory_and_complete_vulnerability(self):
@@ -113,9 +113,10 @@ class Reports(unittest.TestCase):
                  patch.object(reports.Path,'cwd',return_value=root),patch.object(reports,'command',side_effect=command), \
                  patch.object(reports,'docker',return_value='') as docker,patch.object(reports,'inspect_image',return_value=IMAGE), \
                  patch.object(reports,'scan',side_effect=scan) as scanning, \
+                 patch.object(reports,'native_inventory',return_value={'file':'synthetic'}) as native, \
                  patch.dict(os.environ,{'RUNNER_TEMP':str(temp)}),patch('sys.stdout',io.StringIO()):
                 with self.assertRaises(SystemExit) as caught:reports.main()
-            self.assertEqual(caught.exception.code,0);self.assertEqual(scanning.call_count,8)
+            self.assertEqual(caught.exception.code,0);self.assertEqual(scanning.call_count,8);self.assertEqual(native.call_count,2)
             builds=[c.args[0] for c in docker.call_args_list if c.args[0][0]=='build']
             self.assertEqual(len(builds),2)
             self.assertNotEqual(builds[0][-1],builds[1][-1])

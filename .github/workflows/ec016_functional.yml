@@ -31,9 +31,9 @@ env:
   EC016_APPROVED_SHA: ${{ vars.EC016_APPROVED_SHA }}
   EC016_FUNCTIONAL_RISK: ${{ inputs.image_risk }}
   PYTHONDONTWRITEBYTECODE: '1'
-  EC016_POSTGRES_IMAGE: docker.io/library/postgres:16.15-bookworm@sha256:d81f7b51697014367236d07ec58b54153fc28f828b72bf247fe5c7487520bcb0
+  EC016_POSTGRES_IMAGE: docker.io/library/postgres:16.15-trixie@sha256:9e2cf6287f25c3151f4c9421ccce2b17f3e60061c111a29165e0d2cdd9ff0a97
   EC016_POSTGREST_IMAGE: docker.io/postgrest/postgrest:v12.2.12@sha256:5f4ce744539bbba786b4e24dbbd95bdb2a956dcf568c5374995a0ff4a68f5bd2
-  EC016_PYTHON_IMAGE: docker.io/library/python:3.12.14-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
+  EC016_PYTHON_IMAGE: docker.io/library/python:3.12.14-slim-trixie@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
 
 jobs:
   authorize:
@@ -95,7 +95,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: docker.io/library/postgres:16.15-bookworm@sha256:d81f7b51697014367236d07ec58b54153fc28f828b72bf247fe5c7487520bcb0
+        image: docker.io/library/postgres:16.15-trixie@sha256:9e2cf6287f25c3151f4c9421ccce2b17f3e60061c111a29165e0d2cdd9ff0a97
         env:
           POSTGRES_DB: ec016_disposable
           POSTGRES_USER: ec016_admin
