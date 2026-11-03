@@ -54,6 +54,9 @@ class Client:
   if scenario=="db":raise RuntimeError("database failed "+canary)
   if scenario=="db_none":return None
   if scenario=="db_error":return types.SimpleNamespace(error="error")
+  if scenario=="db_empty":return types.SimpleNamespace(error=None,data=[])
+  if scenario=="db_no_data":return types.SimpleNamespace(error=None)
+  if scenario=="db_wrong_ticker":return types.SimpleNamespace(error=None,data=[{"ticker":"GD30"}])
   return types.SimpleNamespace(error=None,data=[{"ticker":"AL30"}])
 def mod(name,**fields):
  m=types.ModuleType(name);m.__dict__.update(fields);sys.modules[name]=m
@@ -76,7 +79,7 @@ class BonosExitStatusTests(unittest.TestCase):
     def test_failures_are_visible_and_safe(self):
         before_write = {"selenium", "selenium_quit", "empty", "invalid",
                         "nan", "zero", "duplicate", "partial", "unknown", "row_exception"}
-        failures = sorted(before_write | {"db", "db_none", "db_error", "quit"})
+        failures = sorted(before_write | {"db", "db_none", "db_error", "db_empty", "db_no_data", "db_wrong_ticker", "quit"})
         for scenario in failures:
             with self.subTest(scenario=scenario):
                 code, output = self.execute(scenario)
