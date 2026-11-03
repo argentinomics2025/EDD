@@ -121,6 +121,12 @@ def run():
         response = supabase.table('historial_bonos').upsert(datos_finales, on_conflict='ticker').execute()
         if response is None or getattr(response, 'error', None):
             raise RuntimeError("confirmación de persistencia ausente o fallida")
+        confirmed = getattr(response, 'data', None)
+        if (not isinstance(confirmed, list)
+                or len(confirmed) != len(datos_finales)
+                or {r.get('ticker') for r in confirmed if isinstance(r, dict)}
+                   != {r['ticker'] for r in datos_finales}):
+            raise RuntimeError("persistencia sin confirmación completa de registros")
         completed = len(datos_finales)
     except Exception as exc:
         failure = exc
