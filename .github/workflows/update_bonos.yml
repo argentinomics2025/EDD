@@ -1,12 +1,14 @@
 name: 📉 Robot Bonos (Mercado)
 
+# EC-007.2: bloqueo temporal. No programar nuevas ejecuciones de bonos.
+# Rehabilitar requiere aprobacion separada y validacion de seguridad/datos.
 on:
-  workflow_dispatch: 
-  schedule:
-    - cron: '0 14-20 * * 1-5' # Cada hora entre 11 y 17 hs ARG de Lunes a Viernes
+  workflow_dispatch:
 
 jobs:
   actualizar-bonos:
+    # Defensa adicional: un dispatch manual tampoco ejecuta el robot.
+    if: ${{ false }}
     name: Scraping y Cálculo Matemático
     runs-on: ubuntu-latest
 
