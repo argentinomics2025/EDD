@@ -6,15 +6,15 @@ SQL=(Path(__file__).resolve().parents[1]/"sql"/"DEC003_LAB_NO_PRODUCCION.sql").r
 
 class SchemaDesignTests(unittest.TestCase):
     def test_schema_isolation(self):self.assertIn("CREATE SCHEMA ec0073_lab;",SQL)
-    def test_three_tables(self):
-        for t in ("ingesta_lotes","observaciones","revisiones"):
+    def test_four_tables(self):
+        for t in ("ingesta_lotes","observaciones","revisiones","eventos_revision"):
             with self.subTest(table=t):self.assertIn("CREATE TABLE ec0073_lab."+t,SQL)
-    def test_append_only(self):self.assertEqual(SQL.count("BEFORE UPDATE OR DELETE ON"),3)
-    def test_rls_force(self):self.assertEqual(SQL.count("FORCE ROW LEVEL SECURITY"),3)
-    def test_rls_enabled(self):self.assertEqual(SQL.count("ENABLE ROW LEVEL SECURITY"),3)
+    def test_append_only(self):self.assertEqual(SQL.count("BEFORE UPDATE OR DELETE ON"),4)
+    def test_rls_force(self):self.assertEqual(SQL.count("FORCE ROW LEVEL SECURITY"),4)
+    def test_rls_enabled(self):self.assertEqual(SQL.count("ENABLE ROW LEVEL SECURITY"),4)
     def test_no_web_grants(self):self.assertNotIn("GRANT ",SQL)
     def test_no_public_policies(self):self.assertNotIn("CREATE POLICY",SQL)
-    def test_unique_records(self):self.assertIn("UNIQUE(lote_id,ticker,registro_fuente,version_fuente)",SQL)
+    def test_unique_records(self):self.assertIn("UNIQUE(fuente,ticker,registro_fuente,version_fuente,fecha_mercado)",SQL)
     def test_unique_hash(self):self.assertIn("hash_carga text NOT NULL UNIQUE",SQL)
     def test_no_publishing(self):self.assertIn("CHECK (autorizado_publicar = false)",SQL)
     def test_price_checks(self):self.assertIn("precio numeric(20,8) NOT NULL CHECK (precio > 0)",SQL)
