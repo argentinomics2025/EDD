@@ -57,11 +57,11 @@ def procesar_ingesta(obtener_historial, obtener_bcra, persistir, *, fecha_consul
     fechas_bcra = []
     for item in detalle:
         if not isinstance(item, dict) or not isinstance(item.get('fecha'), str):
-            raise ValueError('Fecha BCRA inválida') from None
+            raise ValueError('Fecha BCRA inválida')
         try:
             fecha_bcra = datetime.date.fromisoformat(item['fecha'])
         except ValueError:
-            raise ValueError('Fecha BCRA no canónica')
+            raise ValueError('Fecha BCRA inválida') from None
         if fecha_bcra.isoformat() != item['fecha'] or fecha_bcra > fecha_consulta:
             raise ValueError('Fecha BCRA no canónica')
         fechas_bcra.append(item['fecha'])
@@ -73,11 +73,11 @@ def procesar_ingesta(obtener_historial, obtener_bcra, persistir, *, fecha_consul
             raise ValueError('Observación inválida')
         fecha, valor = fila.get('fecha'), fila.get('valor')
         if not isinstance(fecha, str):
-            raise ValueError('Fecha inválida') from None
+            raise ValueError('Fecha inválida')
         try:
             parsed = datetime.date.fromisoformat(fecha)
         except ValueError:
-            raise ValueError('Fecha inválida')
+            raise ValueError('Fecha inválida') from None
         if parsed.isoformat() != fecha:
             raise ValueError('Fecha no canónica')
         if isinstance(valor, bool) or not isinstance(valor, (int, float)) or not math.isfinite(valor):
