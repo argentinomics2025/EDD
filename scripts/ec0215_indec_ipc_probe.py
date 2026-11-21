@@ -47,8 +47,15 @@ def inspect_source(url=SOURCE_URL, opener=None):
         raise ValueError("INDEC response is empty or binary")
     try:
         decoded = data.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise ValueError("INDEC CSV is not UTF-8; encoding requires review") from exc
+        encoding = "utf-8-sig"
+    except UnicodeDecodeError:
+        # Official legacy CSV exports can use Windows-1252 for accented text.
+        # Never silently replace undecodable bytes: keep a strict decoder.
+        try:
+            decoded = data.decode("cp1252", errors="strict")
+            encoding = "cp1252"
+        except UnicodeDecodeError as exc:
+            raise ValueError("INDEC CSV encoding requires review") from exc
     first_lines = decoded.splitlines()[:5]
     if not first_lines or not any(sep in first_lines[0] for sep in (",", ";", "\t")):
         raise ValueError("INDEC CSV header format requires review")
@@ -64,6 +71,7 @@ def inspect_source(url=SOURCE_URL, opener=None):
         "url": url,
         "sha256": hashlib.sha256(data).hexdigest(),
         "bytes": len(data),
+        "encoding": encoding,
         "columns": header,
         "status": "observed_only_no_publication",
         "writes_to_supabase": False,
