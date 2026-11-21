@@ -52,10 +52,12 @@ def procesar_ingesta(obtener_historial, obtener_bcra, persistir, *, fecha_consul
         raise ValueError('Respuesta BCRA inválida') from None
     if not isinstance(detalle, list) or not detalle:
         raise ValueError('Inflación BCRA vacía')
+    # La fuente BCRA puede devolver toda su historia; la entrada original solo
+    # aportaba la observación más reciente, no un backfill masivo.
     fechas_bcra = []
     for item in detalle:
         if not isinstance(item, dict) or not isinstance(item.get('fecha'), str):
-            raise ValueError('Fecha BCRA inválida')
+            raise ValueError('Fecha BCRA inválida') from None
         try:
             fecha_bcra = datetime.date.fromisoformat(item['fecha'])
         except ValueError:
@@ -71,7 +73,7 @@ def procesar_ingesta(obtener_historial, obtener_bcra, persistir, *, fecha_consul
             raise ValueError('Observación inválida')
         fecha, valor = fila.get('fecha'), fila.get('valor')
         if not isinstance(fecha, str):
-            raise ValueError('Fecha inválida')
+            raise ValueError('Fecha inválida') from None
         try:
             parsed = datetime.date.fromisoformat(fecha)
         except ValueError:
