@@ -1,0 +1,19 @@
+name: EC0215 guarded IPC writer — ONE SHOT TEST
+on:
+  push:
+    branches:
+      - ec0215-ipc-writer-guarded-20261123
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Run guarded writer and insert plan synthetic tests (NO DB)
+        run: python -m unittest discover -v -s tests -p 'test_ec0215_ipc*.py'
