@@ -31,3 +31,14 @@ No tiene conexión a Supabase ni operaciones INSERT/UPDATE/DELETE. Ninguna salid
 5. Monitoreo que distinga *sin dato nuevo* normal de *fuente fallida*, *dato revisado*, *DB inaccesible*; la salida de error debe terminar con exit != 0.
 
 **NO ACTIVAR ESCRITURAS NI DECLARAR EC-021.5 CERRADA** hasta satisfacer esos criterios. El indicador antiguo `public.indicators.inflacion` no es el dato consumido por la tarjeta principal; no actualizarlo para resolver un problema inexistente.
+
+
+## Ejecutor de escritura preparado pero BLOQUEADO
+
+`scripts/ec0215_ipc_writer_guarded.py` realiza la planificación pura y, únicamente con `--apply`, `EC0215_PRODUCTION_APPROVAL=IPC_INSERT_ONLY_APPROVED` y una credencial separada `EC0215_IPC_WRITE_KEY`, intentaría un `POST` PostgREST con `resolution=ignore-duplicates` y `on_conflict=date`. La operación usa `INSERT` sin `UPDATE`. Relee la fila para verificar que el valor coincida y falla si detecta una carrera o un resultado diferente. Rechaza URLs de proyectos que no sean `fvyzacodrrmlxgzhneyt`.
+
+**No se configuró esa credencial, no se agregó el script a ningún workflow y no está habilitado en producción.** Cualquier mecanismo de credenciales deberá limitar permisos efectivamente a SELECT+INSERT (no usar un `service_role` general), y deberá resolver previamente escritores paralelos y la procedencia por edición. La variable de activación es una traba adicional, no reemplaza autorización ni control de permisos.
+
+**Pruebas reales de código:** [GitHub Actions #45207530442](https://github.com/argentinomics2025/EDD/actions/runs/45207530442), 14 tests totales de reglas/adapter con HTTP simulado: success. El workflow temporal de testing fue eliminado. Las pruebas NO implican un INSERT autorizado en la DB real.
+
+**Punto de corte:** el monitor de lectura del INDEC sigue activo; el escritor queda inerte. La primera nueva observación mensual no se publicará automáticamente hasta aprobar el mecanismo de permisos y el procedimiento de rollback.
