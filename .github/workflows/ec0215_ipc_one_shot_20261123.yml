@@ -24,7 +24,8 @@ jobs:
           import csv, io, json, ssl
           from collections import Counter
           from urllib.request import Request, build_opener, HTTPSHandler
-          from scripts.ec0215_indec_ipc_probe import SOURCE_URL, INDECRedirects, MAX_BYTES
+          from scripts.ec0215_indec_ipc_probe import INDECRedirects, MAX_BYTES
+          SOURCE_URL = "https://www.indec.gob.ar/ftp/cuadros/economia/serie_ipc_divisiones.csv"
 
           req = Request(SOURCE_URL, headers={"User-Agent": "EconomiaCriolla-IPC-ReadOnly/1.0"})
           opener = build_opener(INDECRedirects(), HTTPSHandler(context=ssl.create_default_context()))
@@ -38,13 +39,14 @@ jobs:
               decoded = data.decode("cp1252")
           dialect = csv.Sniffer().sniff("\\n".join(decoded.splitlines()[:5]), delimiters=",;\\t")
           rows = list(csv.DictReader(io.StringIO(decoded), dialect=dialect))
+          print("COLUMNS",json.dumps(list(rows[0].keys()) if rows else [],ensure_ascii=False))
           print("ROW_COUNT",len(rows))
           print("FIRST_ROWS",json.dumps(rows[:2],ensure_ascii=False))
           print("LAST_ROWS",json.dumps(rows[-2:],ensure_ascii=False))
-          print("REGIONS",json.dumps(Counter(r["Region"] for r in rows).most_common(20),ensure_ascii=False))
-          print("CLASSIFIERS",json.dumps(Counter(r["Clasificador"] for r in rows).most_common(20),ensure_ascii=False))
-          print("PERIODS_LAST",json.dumps(sorted(set(r["Periodo"] for r in rows))[-10:],ensure_ascii=False))
-          candidates=[r for r in rows if "nivel general" in r["Descripcion_aperturas"].casefold() and "nacional" in r["Region"].casefold()]
+          print("REGIONS",json.dumps(Counter(r.get("Region",r.get("region","(sin columna)")) for r in rows).most_common(20),ensure_ascii=False))
+          print("CLASSIFIERS",json.dumps(Counter(r.get("Clasificador","(sin columna)") for r in rows).most_common(20),ensure_ascii=False))
+          print("PERIODS_LAST",json.dumps(sorted(set(r.get("Periodo",r.get("periodo","")) for r in rows))[-10:],ensure_ascii=False))
+          candidates=[r for r in rows if any("nivel general" in str(v).casefold() for v in r.values()) and any("nacional" in str(v).casefold() for v in r.values())]
           print("NATIONAL_GENERAL_COUNT",len(candidates))
           print("NATIONAL_GENERAL_LAST",json.dumps(candidates[-8:],ensure_ascii=False))
           PY
