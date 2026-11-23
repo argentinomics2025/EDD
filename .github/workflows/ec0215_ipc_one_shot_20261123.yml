@@ -1,21 +1,17 @@
-name: "EC-021.5 IPC — validate official NATIONAL monthly series (NO WRITES)"
+name: "EC-021.5 IPC — read-only national source inspection (INACTIVE)"
+# One-shot inspection completed successfully in run 45198323355.
+# Disabled automatically: no push trigger, no schedule, and the job is gated off.
 on:
-  push:
-    branches:
-      - ec0215-ipc-source-one-shot-20261123
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   ipc-nacional-solo-lectura:
-    if: ${{ github.ref == 'refs/heads/ec0215-ipc-source-one-shot-20261123' }}
+    if: ${{ false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Read official INDEC NATIONAL monthly IPC (no DB or publication)
-        run: python scripts/ec0215_indec_ipc_nacional.py
+      - name: Disabled after successful live validation
+        run: echo "Validation finished; see GitHub run 45198323355"
