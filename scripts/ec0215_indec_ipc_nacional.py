@@ -39,13 +39,13 @@ def read_official_csv(url=URL):
         data = response.read(LIMIT + 1)
         if response.headers.get("Content-Type", "").split(";")[0].lower() in {"text/html", "application/pdf"}:
             raise ValueError("INDEC response is not CSV")
-    if not data or len(data) > LIMIT or b"\\x00" in data:
+    if not data or len(data) > LIMIT or b"\x00" in data:
         raise ValueError("Invalid CSV payload")
     return data
 
 
 def parse_national_monthly(data):
-    if not data or len(data) > LIMIT or b"\\x00" in data:
+    if not data or len(data) > LIMIT or b"\x00" in data:
         raise ValueError("Invalid CSV payload")
     try:
         decoded = data.decode("utf-8-sig")
@@ -56,7 +56,7 @@ def parse_national_monthly(data):
     lines = decoded.splitlines()
     if len(lines) < 2:
         raise ValueError("CSV has no data")
-    dialect = csv.Sniffer().sniff("\\n".join(lines[:5]), delimiters=",;\\t")
+    dialect = csv.Sniffer().sniff("\n".join(lines[:5]), delimiters=",;\t")
     reader = csv.DictReader(io.StringIO(decoded), dialect=dialect)
     if not COLUMNS.issubset(set(reader.fieldnames or [])):
         raise ValueError("Official INDEC schema changed")
@@ -68,7 +68,7 @@ def parse_national_monthly(data):
                 and row["Region"].strip().casefold() == "nacional"):
             continue
         raw_period = row["Periodo"].strip()
-        if not re.fullmatch(r"20\\d{4}", raw_period):
+        if not re.fullmatch(r"20\d{4}", raw_period):
             raise ValueError("Unexpected national IPC period")
         period = date(int(raw_period[:4]), int(raw_period[4:]), 1).isoformat()
         if period in rows:
