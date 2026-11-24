@@ -1,30 +1,63 @@
-name: "EC-021.5 IPC INDEC Nacional — lectura oficial automatica (SOLO LECTURA)"
-# Cron checks source and logs latest official monthly value. NO production writes.
-# This workflow is NOT the monthly production ingestor; activation subject to DEC-003.
+name: "EC-021.5 | IPC nacional INDEC: monitor y escritor acotado"
+# Public GitHub repository standard runner. No paid Supabase branch.
+# Annual/monthly official data only, DB writes are disabled by default.
 on:
   schedule:
-    # November and future publication windows: 12th–22nd, 18:00 Argentina (21:00 UTC).
     - cron: "0 21 12-22 * *"
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/ec0215_ipc_nacional_monitor.yml"
+      - "scripts/ec0215_ipc_cloud_ingest.py"
+      - "scripts/ec0215_indec_ipc_nacional.py"
+      - "scripts/ec0215_ipc_insert_plan.py"
+      - "tests/test_ec0215_ipc_cloud_ingest.py"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ec0215-ipc-nacional-solo-lectura
+  group: ec0215-ipc-nacional-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  ipc-nacional-solo-lectura:
-    if: ${{ github.ref == 'refs/heads/main' }}
+  preflight:
+    name: "Official INDEC / public Supabase: check without writes"
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
-      - name: Retrieve source code
-        uses: actions/checkout@v4
-      - name: Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Read INDEC official national IPC, no Supabase access
-        run: python scripts/ec0215_indec_ipc_nacional.py
+      - name: Install HTTP client
+        run: python -m pip install 'requests>=2.31,<3'
+      - name: Unit tests (does not connect to DB)
+        run: python -m unittest discover -s tests -p 'test_ec0215_ipc_*.py' -v
+      - name: Read INDEC and compare public IPC rows
+        env:
+          # Supabase publishable key: public/read-only by design, protected by RLS.
+          EC0215_IPC_READ_KEY: "sb_publishable_32r2WZE28EI-O4aIP1D4Mw_fnwZ826j"
+        run: python -m scripts.ec0215_ipc_cloud_ingest
+
+  guarded_writer:
+    name: "IPC INSERT only (disabled unless explicitly enabled)"
+    needs: preflight
+    if: >-
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
+      && vars.EC0215_IPC_WRITES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install 'requests>=2.31,<3' 'psycopg[binary]>=3.2,<4'
+      - name: Apply one official new month using dedicated PostgreSQL role
+        env:
+          EC0215_IPC_READ_KEY: "sb_publishable_32r2WZE28EI-O4aIP1D4Mw_fnwZ826j"
+          EC0215_IPC_WRITES_ENABLED: "${{ vars.EC0215_IPC_WRITES_ENABLED }}"
+          EC0215_IPC_DB_DSN: "${{ secrets.EC0215_IPC_DB_DSN }}"
+        run: python -m scripts.ec0215_ipc_cloud_ingest --apply
