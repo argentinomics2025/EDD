@@ -1,0 +1,36 @@
+name: "EC-021.5 | IPC INDEC - prueba conexion PG solo lectura"
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ec0215_ipc_pg_connection_probe.yml"
+      - "scripts/ec0215_ipc_pg_connection_probe.py"
+  pull_request:
+    paths:
+      - ".github/workflows/ec0215_ipc_pg_connection_probe.yml"
+      - "scripts/ec0215_ipc_pg_connection_probe.py"
+      - "tests/test_ec0215_ipc_pg_connection_probe.py"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  connection_preflight:
+    name: "Verificar IPC INDEC: rol, secreto y snapshot, sin DML"
+    if: github.repository == 'argentinomics2025/EDD'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install 'requests>=2.31,<3' 'psycopg[binary]>=3.2,<4'
+      - name: Unit tests sin claves
+        run: python -m unittest discover -s tests -p 'test_ec0215_ipc_pg_connection_probe.py' -v
+      - name: Probar conexion PostgreSQL solo lectura con secreto GitHub
+        if: github.event_name != 'pull_request'
+        env:
+          EC0215_IPC_DB_DSN: "${{ secrets.EC0215_IPC_DB_DSN }}"
+        run: python -m scripts.ec0215_ipc_pg_connection_probe
