@@ -1,34 +1,15 @@
-name: ☣️ Actualizar Historial Riesgo País
-
+name: "EC-021 Etapa 3 | Riesgo Pais - bloqueado por licencia"
+# No schedule. Original series sourced from third parties; licensing not certified.
 on:
-  schedule:
-    # Se ejecuta a las 21:00 UTC, que son las 18:00 hs en Argentina (Cierre de mercado).
-    # Los días 1-5 significan de Lunes a Viernes.
-    - cron: '0 21 * * 1-5'
-  workflow_dispatch: 
-
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  update-riesgo-pais:
-    name: Extraer Riesgo País
+  risk_blocked:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 2
     steps:
-      - name: Descargar el código
-        uses: actions/checkout@v4
-
-      - name: Configurar Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Instalar dependencias
+      - name: Explain the publication guard without accessing API or Supabase
         run: |
-          python -m pip install --upgrade pip
-          pip install requests supabase
-
-      - name: Ejecutar Script de Riesgo País
-        env:
-          TZ: 'America/Argentina/Buenos_Aires'
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python scripts/update_riesgo_pais.py
+          echo "BLOQUEADO: Sin licencia documentada para redistribuir EMBI/J.P. Morgan."
+          echo "No se publica ni se modifica historial_riesgo_pais."
