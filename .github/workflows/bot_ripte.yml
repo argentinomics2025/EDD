@@ -5,6 +5,12 @@ on:
   schedule:
     - cron: "0 12 18-24 * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bot_ripte.yml"
+      - "scripts/bot_ripte.py"
+      - "scripts/ec021_ripte_scoped_writer.py"
   pull_request:
     paths:
       - ".github/workflows/bot_ripte.yml"
