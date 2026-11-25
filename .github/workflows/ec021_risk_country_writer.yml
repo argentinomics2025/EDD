@@ -1,0 +1,63 @@
+name: "EC-021 | Riesgo País — escritor PostgreSQL restringido"
+# User-authorized numerical update; third-party EMBI rights remain unverified.
+# No service_role, no historic overwrite. Writer OFF until dedicated login and repo
+# secret EC021_RISK_DB_DSN + repo variable EC021_RISK_WRITES_ENABLED=true.
+on:
+  schedule:
+    - cron: "30 4 * * 2-6"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ec021_risk_country_writer.yml"
+      - "scripts/ec021_risk_country_scoped_writer.py"
+      - "tests/test_ec021_risk_country_scoped_writer.py"
+  pull_request:
+    paths:
+      - ".github/workflows/ec021_risk_country_writer.yml"
+      - "scripts/ec021_risk_country_scoped_writer.py"
+      - "tests/test_ec021_risk_country_scoped_writer.py"
+permissions:
+  contents: read
+concurrency:
+  group: ec021-risk-scoped-writer-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  preflight:
+    name: "Riesgo País: pruebas y comparación pública sin escritura"
+    if: github.repository == 'argentinomics2025/EDD'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install 'requests>=2.31,<3'
+      - name: Guardas del escritor y regresión
+        run: python -m unittest discover -s tests -p 'test_ec021_risk_country_*.py' -v
+      - name: Comparar fuente y datos públicos, solo lectura
+        if: github.event_name != 'pull_request'
+        run: python -m scripts.ec021_risk_country_scoped_writer
+
+  guarded_writer:
+    name: "Riesgo País: insertar un día + actualizar tarjeta, solo si autorizado"
+    needs: preflight
+    if: >-
+      github.repository == 'argentinomics2025/EDD'
+      && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
+      && vars.EC021_RISK_WRITES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install 'requests>=2.31,<3' 'psycopg[binary]>=3.2,<4'
+      - name: Postgres dedicado, transacción atómica, sin service_role
+        env:
+          EC021_RISK_WRITES_ENABLED: "${{ vars.EC021_RISK_WRITES_ENABLED }}"
+          EC021_RISK_DB_DSN: "${{ secrets.EC021_RISK_DB_DSN }}"
+        run: python -m scripts.ec021_risk_country_scoped_writer --apply
