@@ -50,12 +50,22 @@ if [[ "${EC0215_ALERT_DRY_RUN:-false}" == "true" ]]; then
 fi
 
 : "${GH_TOKEN:?GitHub Actions token required}"
-issue="$(gh issue list --repo "$GH_REPO" --state open --limit 200 --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)"
+# Use REST instead of gh issue list/view GraphQL, avoiding transient GraphQL 502.
+# Search only this project's issue title; never expose source data or credentials.
+issue="$(gh api "repos/$GH_REPO/issues?state=open&per_page=100" --jq '.[] | select(.title == "EC-021.5 | Falla IPC automatizado" or .title == "EC-021.5 | PRUEBA de alerta IPC") | [.number,.title] | @tsv' |
+  awk -F '\t' -v title="$title" '$2 == title {print $1; exit}')"
 
 if [[ -n "$issue" ]]; then
-  gh issue comment "$issue" --repo "$GH_REPO" --body "$body"
-  echo "[ALERTA] Se agregó evidencia al issue #$issue"
+  # Deduplicate by originating execution URL, retaining one active issue.
+  prior="$(gh api "repos/$GH_REPO/issues/$issue" --jq '.body')"
+  prior="$prior"$'\n'"$(gh api "repos/$GH_REPO/issues/$issue/comments?per_page=100" --jq '.[].body')"
+  if ! grep -Fq "$EC0215_ALERT_SOURCE_URL" <<< "$prior"; then
+    gh api -X POST "repos/$GH_REPO/issues/$issue/comments" -f body="$body" --jq '.html_url'
+    echo "[ALERTA] Se agregó evidencia al issue #$issue"
+  else
+    echo "[ALERTA] Evidencia ya registrada en issue #$issue"
+  fi
 else
-  gh issue create --repo "$GH_REPO" --title "$title" --body "$body" --assignee argentinomics2025
+  gh api -X POST "repos/$GH_REPO/issues" -f title="$title" -f body="$body" -f "assignees[]=argentinomics2025" --jq '.html_url'
   echo "[ALERTA] Issue creado y asignado al responsable"
 fi
