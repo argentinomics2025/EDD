@@ -28,13 +28,14 @@ if [[ "${EC021_RISK_ALERT_DRY_RUN:-false}" == "true" ]]; then
   printf '%s\n%s\n' "$title" "$body"
   exit 0
 fi
-issue="$(gh issue list --repo "$GH_REPO" --state open --limit 200 --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)"
+# Use GitHub REST, not 'gh issue list/view', which requires GraphQL.
+issue="$(gh api "repos/$GH_REPO/issues?state=open&per_page=100" --jq '.[] | select(.title == "EC-021 | Riesgo País: fuente adelantada, publicación bloqueada" and .pull_request == null) | .number' | head -n 1)"
 if [[ -z "$issue" ]]; then
-  gh issue create --repo "$GH_REPO" --title "$title" --body "$body" --assignee "argentinomics2025"
+  gh api -X POST "repos/$GH_REPO/issues" -f title="$title" -f body="$body" -f "assignees[]=argentinomics2025" --jq '.html_url'
 else
-  # Avoid repeated notifications for the same source period.
-  if ! gh issue view "$issue" --repo "$GH_REPO" --json body,comments \
-      --jq '[.body, (.comments[].body)] | join("\n")' | grep -Fq "$EC021_RISK_SOURCE_DATE"; then
-    gh issue comment "$issue" --repo "$GH_REPO" --body "$body"
+  previous="$(gh api "repos/$GH_REPO/issues/$issue" --jq '.body')"
+  previous="$previous"$'\n'"$(gh api "repos/$GH_REPO/issues/$issue/comments?per_page=100" --jq '.[].body')"
+  if ! grep -Fq "$EC021_RISK_SOURCE_DATE" <<< "$previous"; then
+    gh api -X POST "repos/$GH_REPO/issues/$issue/comments" -f body="$body" --jq '.html_url'
   fi
 fi
