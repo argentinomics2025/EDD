@@ -143,7 +143,7 @@ class WriterTests(unittest.TestCase):
             write_in_transaction(SOURCE,Conn(Cursor(stored=SOURCE[:-2])))
 
     def test_public_snapshot_rejects_empty_or_huge(self):
-        for stored in ([], SOURCE*40):
+        for stored in ([], SOURCE*50):
             with self.assertRaises(RipteValidationError):
                 public_snapshot(http=HTTP(stored))
 
