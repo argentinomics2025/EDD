@@ -2,6 +2,12 @@ name: "EC-021 | Riesgo País ArgentinaDatos - validación sin publicación"
 # Deliberately NO schedule or write credentials: upstream EMBI redistribution rights unresolved.
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/update_riesgo_pais.yml"
+      - "scripts/ec021_risk_country_readonly.py"
+      - "scripts/update_riesgo_pais.py"
   pull_request:
     paths:
       - ".github/workflows/update_riesgo_pais.yml"
@@ -24,7 +30,7 @@ jobs:
       - name: Unit tests (no production calls)
         run: python -m unittest discover -s tests -p 'test_ec021_risk_country_readonly.py' -v
       - name: ArgentinaDatos vs Supabase (read-only, never publish)
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: python -m scripts.ec021_risk_country_readonly
       - name: Confirm the legacy write path is permanently blocked
         run: |
