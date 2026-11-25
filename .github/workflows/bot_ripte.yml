@@ -1,34 +1,27 @@
-name: 🤖 Bot RIPTE (Salarios)
-
+name: "EC-021 Etapa 3 | RIPTE oficial - solo lectura"
+# No schedule or DB access until source, duplicate 2026-01 and rollback are cleared.
 on:
-  schedule:
-    # Se ejecuta el día 20 de cada mes a las 10:00 AM UTC (7:00 AM Argentina)
-    # El RIPTE suele salir a mediados de mes, el 20 es una fecha segura.
-    - cron: '0 10 20 * *'
-  workflow_dispatch: # El botón mágico para correrlo a mano desde GitHub si querés
-
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/bot_ripte.yml"
+      - "scripts/bot_ripte.py"
+      - "tests/test_ec021_ripte_safe.py"
+permissions:
+  contents: read
 jobs:
-  actualizar-ripte:
-    name: Procesar Datos de Salarios
+  ripte_readonly:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 5
     steps:
-      - name: 📥 Clonar repositorio
-        uses: actions/checkout@v4
-
-      - name: 🐍 Configurar Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-
-      - name: 📦 Instalar dependencias
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests supabase urllib3 beautifulsoup4
-
-      - name: 🚀 Ejecutar Robot de Salarios
-        env:
-          TZ: 'America/Argentina/Buenos_Aires'
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python scripts/bot_ripte.py
+          python-version: "3.11"
+      - name: Install bounded read dependencies
+        run: python -m pip install 'requests>=2.31,<3' 'beautifulsoup4>=4.12,<5'
+      - name: Verify parser and strict historical guard (synthetic, no database)
+        run: python -m unittest discover -s tests -p 'test_ec021_ripte_safe.py' -v
+      - name: Read official Ministry RIPTE page (no database credentials)
+        if: github.event_name == 'workflow_dispatch'
+        run: python -m scripts.bot_ripte
