@@ -7,7 +7,7 @@ from scripts.ec021_risk_country_scoped_writer import (
 )
 from scripts.ec021_risk_country_readonly import RiskSourceError
 
-def series(n=30,start=date(2026,11,1)):
+def series(n=30,start=date(2026,11,5)):
     return {(start+timedelta(days=i)).isoformat():800+i for i in range(n)}
 
 class Cursor:
@@ -48,11 +48,11 @@ class PlanTests(unittest.TestCase):
     def test_one_day_insert_only(self):
         s=series(21)
         stored=series(20)
-        self.assertEqual(plan(s,stored,819,today=date(2026,12,1)),[{"fecha":"2026-11-21","valor":820}])
+        self.assertEqual(plan(s,stored,819,today=date(2026,12,1)),[{"fecha":"2026-11-25","valor":820}])
     def test_revision_rejected(self):
         s=series(21);old=series(20);old["2026-11-19"]=777
         with self.assertRaisesRegex(RiskSourceError,"Historical revision"):
-            plan(s,old,819,today=date(2026,12,1))
+            plan(s,old,819,today=date(2026,12,10))
     def test_headline_mismatch_rejected(self):
         with self.assertRaisesRegex(RiskSourceError,"Headline"):
             plan(series(21),series(20),700,today=date(2026,12,1))
@@ -64,7 +64,7 @@ class PlanTests(unittest.TestCase):
             plan(series(21),series(20),819,today=date(2026,11,20))
     def test_gap_over_seven_days_rejected(self):
         old=series(20)
-        s={**old,"2026-11-29":1000}
+        s={**old,"2026-12-04":1000}
         with self.assertRaisesRegex(RiskSourceError,"date"):
             plan(s,old,819,today=date(2026,12,1))
     def test_dsn_strict_role(self):
