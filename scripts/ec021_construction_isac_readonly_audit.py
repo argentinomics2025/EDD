@@ -54,7 +54,7 @@ def assess(source,stored):
             "writes_to_supabase":False,"revises_historical_values":False}
 
 def run(*,http=requests):
-    source=read(SOURCE,http=http,params={"ids":SERIES,"limit":30,"format":"json"})
+    source=read(SOURCE,http=http,params={"ids":SERIES,"limit":500,"format":"json"})
     stored=read(DB,http=http,params={"select":"fecha,indice","order":"fecha.desc","limit":"30"},
                 headers={"apikey":KEY,"Accept":"application/json"})
     return assess(source,stored)
