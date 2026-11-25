@@ -82,8 +82,8 @@ def monitor(*, http=requests, today=None):
     if source_latest < db_latest:
         raise RiskSourceError("Data provider behind DB; cannot reconcile safely")
     new = sorted(d for d in official if d > db_latest)
-    if len(new) > 7:
-        raise RiskSourceError("Too many pending source observations; review required")
+    # Read-only mode may accumulate a long backlog while publication rights are pending.
+    # Never fail solely because there are more than seven unpublishable observations.
     return {
         "status": "no_change" if not new else "source_ahead_publication_blocked",
         "mode": "read_only_monitor",
