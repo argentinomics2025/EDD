@@ -11,11 +11,13 @@ on:
       - ".github/workflows/bot_ripte.yml"
       - "scripts/bot_ripte.py"
       - "scripts/ec021_ripte_scoped_writer.py"
+      - "scripts/ec021_ripte_connection_probe.py"
   pull_request:
     paths:
       - ".github/workflows/bot_ripte.yml"
       - "scripts/bot_ripte.py"
       - "scripts/ec021_ripte_scoped_writer.py"
+      - "scripts/ec021_ripte_connection_probe.py"
       - "tests/test_ec021_ripte_safe.py"
       - "tests/test_ec021_ripte_scoped_writer.py"
 permissions:
@@ -39,6 +41,23 @@ jobs:
       - name: Check official RIPTE vs public Supabase, no writes
         if: github.event_name != 'pull_request'
         run: python -m scripts.ec021_ripte_scoped_writer
+
+  connection_probe:
+    name: "RIPTE dedicated PostgreSQL read-only connection check"
+    needs: preflight
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install 'requests>=2.31,<3' 'beautifulsoup4>=4.12,<5' 'psycopg[binary]>=3.2,<4'
+      - name: Validate isolated credential and read-only PostgreSQL transaction
+        env:
+          EC021_RIPTE_DB_DSN: "${{ secrets.EC021_RIPTE_DB_DSN }}"
+        run: python -m scripts.ec021_ripte_connection_probe
 
   guarded_writer:
     name: "RIPTE monthly INSERT-only (OFF unless authorized)"
