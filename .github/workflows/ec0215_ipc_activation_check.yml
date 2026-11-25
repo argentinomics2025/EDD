@@ -1,0 +1,71 @@
+name: "EC-021.5 | IPC INDEC - comprobacion de activacion"
+# One-time verification on this file's merge. No schedule here.
+# The existing ec0215_ipc_nacional_monitor.yml is the only scheduled IPC writer.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ec0215_ipc_activation_check.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/ec0215_ipc_activation_check.yml"
+permissions:
+  contents: read
+concurrency:
+  group: ec0215-ipc-nacional-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  preflight:
+    name: "Fuente oficial INDEC, historial y guardas"
+    if: github.repository == 'argentinomics2025/EDD'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install 'requests>=2.31,<3'
+      - name: Unit tests IPC
+        run: python -m unittest discover -s tests -p 'test_ec0215_ipc_*.py' -v
+      - name: Comparación oficial de solo lectura
+        if: github.event_name != 'pull_request'
+        env:
+          EC0215_IPC_READ_KEY: "sb_publishable_32r2WZE28EI-O4aIP1D4Mw_fnwZ826j"
+        run: python -m scripts.ec0215_ipc_cloud_ingest
+      - name: Verificar interruptor sin exponer credenciales
+        if: github.event_name != 'pull_request'
+        env:
+          ENABLED: "${{ vars.EC0215_IPC_WRITES_ENABLED == 'true' }}"
+        run: |
+          if [ "$ENABLED" = "true" ]; then
+            echo "EC0215_IPC_WRITES_ENABLED: ACTIVO"
+          else
+            echo "EC0215_IPC_WRITES_ENABLED: INACTIVO; no se escribirá ningún dato"
+          fi
+  writer_check:
+    name: "Escritor IPC exclusivo (solo si activado)"
+    needs: preflight
+    if: >-
+      github.repository == 'argentinomics2025/EDD'
+      && github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && vars.EC0215_IPC_WRITES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install 'requests>=2.31,<3' 'psycopg[binary]>=3.2,<4'
+      - name: Transacción única INSERT-only; public API confirmada
+        env:
+          EC0215_IPC_READ_KEY: "sb_publishable_32r2WZE28EI-O4aIP1D4Mw_fnwZ826j"
+          EC0215_IPC_WRITES_ENABLED: "${{ vars.EC0215_IPC_WRITES_ENABLED }}"
+          EC0215_IPC_DB_DSN: "${{ secrets.EC0215_IPC_DB_DSN }}"
+        run: python -m scripts.ec0215_ipc_cloud_ingest --apply
