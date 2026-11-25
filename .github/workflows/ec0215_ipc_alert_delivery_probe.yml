@@ -1,0 +1,46 @@
+name: "EC-021.5 | IPC INDEC - ensayo real de alerta"
+# Only runs on this file's merge. No schedule. No Supabase access or credential.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ec0215_ipc_alert_delivery_probe.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/ec0215_ipc_alert_delivery_probe.yml"
+permissions:
+  contents: read
+jobs:
+  dry_run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validar modos sintéticos sin Issue
+        env:
+          GH_REPO: argentinomics2025/EDD
+          EC0215_ALERT_DRY_RUN: "true"
+          EC0215_ALERT_SOURCE_URL: "https://github.com/argentinomics2025/EDD/actions"
+        run: |
+          bash -n scripts/ec0215_issue_alert.sh
+          EC0215_ALERT_MODE=rehearsal bash scripts/ec0215_issue_alert.sh | grep -Fq "PRUEBA de alerta IPC"
+          EC0215_ALERT_MODE=failure bash scripts/ec0215_issue_alert.sh | grep -Fq "Falla IPC automatizado"
+  real_delivery:
+    needs: dry_run
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Entregar ensayo de alerta al Issue de EDD, no hay falla real
+        env:
+          GH_TOKEN: "${{ github.token }}"
+          GH_REPO: "${{ github.repository }}"
+          EC0215_ALERT_MODE: rehearsal
+          EC0215_ALERT_SOURCE_URL: "https://github.com/argentinomics2025/EDD/actions/runs/${{ github.run_id }}"
+        run: bash scripts/ec0215_issue_alert.sh
