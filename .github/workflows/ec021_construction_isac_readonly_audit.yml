@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/ec021_construction_isac_readonly_audit.yml"
+      - "scripts/ec021_construction_isac_readonly_audit.py"
   pull_request:
     paths:
       - ".github/workflows/ec021_construction_isac_readonly_audit.yml"
