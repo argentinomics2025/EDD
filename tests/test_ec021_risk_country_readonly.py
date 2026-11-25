@@ -47,6 +47,14 @@ class RiskCountryTests(unittest.TestCase):
         self.assertEqual(result["new_observations_count"],1)
         self.assertFalse(result["writes_to_supabase"])
 
+    def test_long_unpublished_backlog_is_reported_not_written(self):
+        data=rows(30)
+        http=HTTP(data,data[:15])
+        result=monitor(http=http,today=date(2026,11,25))
+        self.assertEqual(result["status"],"source_ahead_publication_blocked")
+        self.assertEqual(result["new_observations_count"],15)
+        self.assertFalse(result["writes_to_supabase"])
+
     def test_discrepancy_fails_closed(self):
         data=rows()
         stored=[dict(x) for x in data[-20:]]
