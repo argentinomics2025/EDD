@@ -1,0 +1,72 @@
+name: "EC-021 Etapa 3 | Alertas RIPTE"
+on:
+  workflow_run:
+    workflows:
+      - "EC-021 Etapa 3 | RIPTE oficial - monitor y escritor acotado"
+    types: [completed]
+  issue_comment:
+    types: [created]
+  pull_request:
+    paths:
+      - ".github/workflows/ec021_ripte_alerts.yml"
+      - "scripts/ec021_ripte_issue_alert.sh"
+permissions:
+  contents: read
+jobs:
+  test_alert_script:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax and dry run
+        env:
+          GH_TOKEN: dry-run-token
+          GH_REPO: argentinomics2025/EDD
+          EC021_RIPTE_ALERT_DRY_RUN: "true"
+          EC021_RIPTE_ALERT_URL: https://github.com/argentinomics2025/EDD/actions/runs/45609536559
+        run: |
+          set -euo pipefail
+          bash -n scripts/ec021_ripte_issue_alert.sh
+          EC021_RIPTE_ALERT_TEST=true bash scripts/ec021_ripte_issue_alert.sh | grep -Fq "EC-021 | PRUEBA alerta RIPTE"
+          EC021_RIPTE_ALERT_TEST=false bash scripts/ec021_ripte_issue_alert.sh | grep -Fq "EC-021 | Falla monitor RIPTE"
+  send_alert:
+    if: >-
+      (github.event_name == 'workflow_run'
+        && github.event.workflow_run.conclusion == 'failure'
+        && github.event.workflow_run.head_repository.full_name == github.repository
+        && github.event.workflow_run.head_branch == 'main'
+        && (github.event.workflow_run.event == 'schedule'
+            || github.event.workflow_run.event == 'workflow_dispatch'))
+      ||
+      (github.event_name == 'issue_comment'
+        && github.event.issue.number == 5
+        && github.event.issue.pull_request == null
+        && github.event.comment.user.login == 'argentinomics2025'
+        && github.event.comment.body == '/ec021-ripte-alert-test')
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Create or update assigned GitHub issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          SOURCE_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          REHEARSAL_URL: ${{ github.event.comment.html_url }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            export EC021_RIPTE_ALERT_TEST=true
+            export EC021_RIPTE_ALERT_URL="$REHEARSAL_URL"
+          else
+            export EC021_RIPTE_ALERT_TEST=false
+            export EC021_RIPTE_ALERT_URL="$SOURCE_RUN_URL"
+          fi
+          bash scripts/ec021_ripte_issue_alert.sh

@@ -1,27 +1,62 @@
-name: "EC-021 Etapa 3 | RIPTE oficial - solo lectura"
-# No schedule or DB access until source, duplicate 2026-01 and rollback are cleared.
+name: "EC-021 Etapa 3 | RIPTE oficial - monitor y escritor acotado"
+# Zero service_role access. Read-only scheduled preflight. Writer OFF unless explicit
+# repo variable and scoped PostgreSQL DSN secret are both configured.
 on:
+  schedule:
+    - cron: "0 12 18-24 * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bot_ripte.yml"
+      - "scripts/bot_ripte.py"
+      - "scripts/ec021_ripte_scoped_writer.py"
   pull_request:
     paths:
       - ".github/workflows/bot_ripte.yml"
       - "scripts/bot_ripte.py"
+      - "scripts/ec021_ripte_scoped_writer.py"
       - "tests/test_ec021_ripte_safe.py"
+      - "tests/test_ec021_ripte_scoped_writer.py"
 permissions:
   contents: read
+concurrency:
+  group: ec021-ripte-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
-  ripte_readonly:
+  preflight:
+    name: "RIPTE oficial + produccion: read-only consistency gate"
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 7
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install bounded read dependencies
-        run: python -m pip install 'requests>=2.31,<3' 'beautifulsoup4>=4.12,<5'
-      - name: Verify parser and strict historical guard (synthetic, no database)
-        run: python -m unittest discover -s tests -p 'test_ec021_ripte_safe.py' -v
-      - name: Read official Ministry RIPTE page (no database credentials)
-        if: github.event_name == 'workflow_dispatch'
-        run: python -m scripts.bot_ripte
+      - run: python -m pip install 'requests>=2.31,<3' 'beautifulsoup4>=4.12,<5'
+      - name: Offline safety regression tests
+        run: python -m unittest discover -s tests -p 'test_ec021_ripte_*.py' -v
+      - name: Check official RIPTE vs public Supabase, no writes
+        if: github.event_name != 'pull_request'
+        run: python -m scripts.ec021_ripte_scoped_writer
+
+  guarded_writer:
+    name: "RIPTE monthly INSERT-only (OFF unless authorized)"
+    needs: preflight
+    if: >-
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
+      && vars.EC021_RIPTE_WRITES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install 'requests>=2.31,<3' 'beautifulsoup4>=4.12,<5' 'psycopg[binary]>=3.2,<4'
+      - name: Guarded writer with dedicated PostgreSQL role
+        env:
+          EC021_RIPTE_WRITES_ENABLED: "${{ vars.EC021_RIPTE_WRITES_ENABLED }}"
+          EC021_RIPTE_DB_DSN: "${{ secrets.EC021_RIPTE_DB_DSN }}"
+        run: python -m scripts.ec021_ripte_scoped_writer --apply
