@@ -9,4 +9,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "Robot anterior retirado: usar ec021_dollar_safe_writer.yml"
-# Sin schedule y sin referencias a SUPABASE_KEY ni pasos de escritura.
+# Workflow de compatibilidad: sin cron, sin credenciales y sin escrituras.
