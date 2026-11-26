@@ -17,6 +17,14 @@ FIELDS = (
     "hormigon_elaborado", "ladrillos_huecos", "mosaicos", "pinturas",
     "pisos_revestimientos", "placas_yeso", "yeso", "resto"
 )
+SOURCE_COLUMNS = {
+    "articulos_sanitarios": "isac_articulos_sanitarios_de_ceramica",
+    "hierro_redondo": "isac_hierro_redondo_y_aceros_para_la_construccion",
+    "mosaicos": "isac_mosaicos_graniticos_y_calcareos",
+    "pinturas": "isac_pinturas_para_construccion",
+    "pisos_revestimientos": "isac_pisos_y_revestimientos_ceramicos",
+    "placas_yeso": "isac_placas_de_yeso",
+}
 MAX_BYTES = 4 * 1024 * 1024
 
 def analyze(text, stored):
@@ -40,7 +48,7 @@ def analyze(text, stored):
     comparisons = []
     missing_columns = []
     for field in FIELDS:
-        source_col = "isac_" + field
+        source_col = SOURCE_COLUMNS.get(field, "isac_" + field)
         if source_col not in headers:
             missing_columns.append(source_col)
             continue
