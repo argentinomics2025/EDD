@@ -119,7 +119,16 @@ def source_report(release_month, *, http=requests):
     for f in FIELDS:
         input_values[f]=str(inputs[target][f])
         input_values["var_"+f]=str((inputs[target][f]/inputs[prev][f]-1)*100)
+    history=[]
+    cursor=prev
+    for _ in range(9):
+        if cursor not in index or cursor not in inputs or len(inputs[cursor])!=len(FIELDS):
+            raise ValueError("At least nine consecutive official prior months are required")
+        history.append({"fecha":cursor.isoformat(),"indice":str(index[cursor]),
+                        "insumos":{f:str(inputs[cursor][f]) for f in FIELDS}})
+        cursor=(cursor-timedelta(days=1)).replace(day=1)
     return {"status":"source_ready","period":target.isoformat(),"activity":activity,
+            "history_to_reconcile":history,
             "inputs":input_values,"source_index_sha":index_sha,"source_inputs_sha":inputs_sha,
             "index_url":INDEX_URL,"index_series":SERIES,"inputs_url":INPUTS_URL,
             "writes_to_supabase":False}
@@ -156,6 +165,23 @@ def insert_once(report, dsn):
                         raise ValueError("Invalid or duplicate stored ISAC history")
                     cur.execute("SELECT md5(string_agg(row_to_json(t)::text,'|' ORDER BY t.fecha)) FROM (SELECT * FROM public."+table+" ORDER BY fecha)t")
                     fingerprints[table]=(count,last,cur.fetchone()[0])
+                # Do not build a new monthly rate on revised, contradictory prior months.
+                history=report.get("history_to_reconcile",[])
+                if len(history)!=9:
+                    raise ValueError("Missing nine source historical comparisons")
+                for month in history:
+                    when=date.fromisoformat(month["fecha"])
+                    cur.execute("SELECT indice FROM public.construccion_actividad WHERE fecha=%s",(when,))
+                    stored=cur.fetchone()
+                    if not stored or abs(Decimal(str(stored[0]))-Decimal(month["indice"]))>Decimal("0.051"):
+                        raise ValueError("Adjusted ISAC recent history revised: manual edition review")
+                    cur.execute("SELECT "+",".join(FIELDS)+" FROM public.construccion_insumos WHERE fecha=%s",(when,))
+                    stored=cur.fetchone()
+                    if not stored:
+                        raise ValueError("Missing inputs recent history")
+                    for f,value in zip(FIELDS,stored):
+                        if value is None or abs(Decimal(str(value))-Decimal(month["insumos"][f]))>Decimal("0.051"):
+                            raise ValueError("Input "+f+" recent history revised: manual edition review")
                 exists=[]
                 for table,cols,payload in (
                     ("construccion_actividad",ACT_COLS,report["activity"]),
