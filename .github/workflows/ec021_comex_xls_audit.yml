@@ -1,0 +1,24 @@
+name: EC-021 COMEX — inspección XLS oficial sin escrituras
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/ec021_comex_xls_audit.py
+      - scripts/ec021_comex_latest_link.py
+      - tests/test_ec021_comex_discovery.py
+      - .github/workflows/ec021_comex_xls_audit.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect_official_xls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check xlrd==2.0.2
+      - run: python -m unittest discover -s tests -p 'test_ec021_comex_discovery.py' -v
+      - run: python scripts/ec021_comex_latest_link.py --release-month 2026-11
