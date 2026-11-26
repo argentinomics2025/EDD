@@ -1,24 +1,33 @@
-name: "EC-021 Dólar - fuente y autenticación de solo lectura"
+name: "EC-021 Dólar - escritor exclusivo automatizado"
 on:
   workflow_dispatch:
     inputs:
       check_db:
-        description: "Probar autenticación de rol dedicado SIN escrituras"
+        description: "Solo verificar conexión PostgreSQL"
+        type: boolean
+        default: false
+      apply:
+        description: "Ejecutar el escritor y comprobar segunda corrida idempotente"
         type: boolean
         default: false
   pull_request:
     paths:
-      - "scripts/ec021_dollar_safe_writer.py"
-      - "scripts/ec021_dollar_health.py"
-      - "tests/test_ec021_dollar_health.py"
-      - ".github/workflows/ec021_dollar_health.yml"
-      - "scripts/actualizar_dolar.py"
-      - ".github/workflows/robot_dolar.yml"
-      - "tests/test_ec021_dollar_legacy_safety.py"
-      - "tests/test_ec021_dollar_safe_writer.py"
+      - '.github/workflows/ec021_dollar_safe_writer.yml'
+      - '.github/workflows/robot_dolar.yml'
+      - 'tests/test_ec021_dollar_legacy_safety.py'
+  push:
+    branches: [main]
+    paths:
       - ".github/workflows/ec021_dollar_safe_writer.yml"
+      - ".github/workflows/robot_dolar.yml"
+  schedule:
+    # Horario de Argentina: 11:00, 14:00 y 17:00, lunes a viernes.
+    - cron: "0 14,17,20 * * 1-5"
 permissions:
   contents: read
+concurrency:
+  group: ec021-dollar-exclusive-production
+  cancel-in-progress: false
 jobs:
   test_and_monitor:
     runs-on: ubuntu-latest
@@ -29,12 +38,13 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install requests "psycopg[binary]>=3.2,<4"
-      - run: python -m unittest discover -s tests -p 'test_ec021_dollar_*.py' -v
-      - name: Validar las siete cotizaciones sin escrituras
+      - name: Pruebas sin escrituras
+        run: python -m unittest discover -s tests -p 'test_ec021_dollar_*.py' -v
+      - name: Fuente DolarAPI validada
         run: python -m scripts.ec021_dollar_safe_writer
   connection_check:
     needs: test_and_monitor
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.check_db == true }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.check_db == true && inputs.apply != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -43,8 +53,55 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install requests "psycopg[binary]>=3.2,<4"
-      - name: Comprobar rol exclusivo sin modificar Supabase
+      - name: Autenticación de solo lectura
         env:
           EC021_DOLLAR_DB_DSN: ${{ secrets.EC021_DOLLAR_DB_DSN }}
         run: python -m scripts.ec021_dollar_safe_writer --check-db
-# No automatic cron or writer job. EC021_DOLLAR_WRITES_ENABLED is unused here.
+  exclusive_writer:
+    needs: test_and_monitor
+    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.apply == true) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests "psycopg[binary]>=3.2,<4"
+      - name: Primera escritura atómica bajo rol dedicado
+        env:
+          EC021_DOLLAR_DB_DSN: ${{ secrets.EC021_DOLLAR_DB_DSN }}
+          EC021_DOLLAR_WRITES_ENABLED: "true"
+        run: |
+          set -euo pipefail
+          python -m scripts.ec021_dollar_safe_writer --apply | tee /tmp/ec021-dollar-first.json
+      - name: Segunda corrida idempotente — debe dar no_change
+        env:
+          EC021_DOLLAR_DB_DSN: ${{ secrets.EC021_DOLLAR_DB_DSN }}
+          EC021_DOLLAR_WRITES_ENABLED: "true"
+        run: |
+          set -euo pipefail
+          python -m scripts.ec021_dollar_safe_writer --apply | tee /tmp/ec021-dollar-second.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result=json.loads(Path('/tmp/ec021-dollar-second.json').read_text())
+          if result.get('mode') != 'no_change' or result.get('applied') is not False:
+              raise SystemExit("Segunda corrida no idempotente: revisar antes de certificar")
+          print("EC021_DOLLAR_IDEMPOTENT_REPLAY_PASS")
+          PY
+  alert:
+    needs: [test_and_monitor, exclusive_writer]
+    if: ${{ always() && (needs.test_and_monitor.result == 'failure' || needs.exclusive_writer.result == 'failure') && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      issues: write
+    steps:
+      - name: Alertar en issue #33
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_RUN_ID: ${{ github.run_id }}
+        run: |
+          gh issue comment 33 --repo "$GH_REPO" --body "⚠️ EC-021 Dólar: falló preflight/escritor exclusivo. Ver https://github.com/$GH_REPO/actions/runs/$GH_RUN_ID . No se ejecutó el robot legado."
