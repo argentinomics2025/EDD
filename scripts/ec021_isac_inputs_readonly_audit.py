@@ -64,6 +64,7 @@ def analyze(text, stored):
             "source":SOURCE,"source_rows":len(rows),"last_official":max(sources),
             "last_stored":max(x["fecha"] for x in stored),
             "missing_source_columns":missing_columns,
+            "official_header":headers,
             "fields":comparisons,"writes_to_supabase":False}
 
 def main():
