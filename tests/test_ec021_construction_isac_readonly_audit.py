@@ -1,6 +1,6 @@
 """Synthetic ISAC read-only audit tests."""
 import unittest
-from scripts.ec021_construction_isac_readonly_audit import assess
+from scripts.ec021_construction_isac_readonly_audit import assess,SERIES
 
 def fixtures():
     source={"data":[[f"2025-{i:02d}-01",100+i] for i in range(1,13)]}
@@ -8,6 +8,8 @@ def fixtures():
     return source,stored
 
 class TestConstruction(unittest.TestCase):
+    def test_intended_desestacionalizada_series(self):
+        self.assertEqual(SERIES,"33.2_ISAC_SIN_EDAD_0_M_23_56")
     def test_exact_match(self):
         a,b=fixtures()
         result=assess(a,b)
