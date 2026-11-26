@@ -49,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            month="2026-11"
+            month="2026-12"
           elif [ -n "$RELEASE" ]; then
             month="$RELEASE"
           elif [ "$(date -u +%d)" -le 3 ]; then
