@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 import json
 import os
+import re
 from ec021_comex_latest_link import inspect
 
 COLUMNS = (
@@ -46,6 +47,12 @@ def insert_only(document, dsn):
     values=document["values"]
     period=date.fromisoformat(values["fecha"])
     edition_sha=document["sha256"]
+    url_date=re.search(r"ica_cuadros_(\\d{2})_(\\d{2})_(\\d{2})\\.xls$",document["url"])
+    if not url_date:
+        raise ValueError("Unknown official ICA edition date")
+    publication_date=date(2000+int(url_date[3]),int(url_date[2]),int(url_date[1]))
+    if publication_date.year != period.year+int(period.month==12) or publication_date.month != (period.month%12+1):
+        raise ValueError("Release-month/period mismatch")
     with psycopg.connect(dsn, connect_timeout=12, sslmode="require") as conn:
         with conn.transaction():
             with conn.cursor() as cur:
@@ -82,7 +89,7 @@ def insert_only(document, dsn):
                     INSERT INTO ec021_audit.comex_source_editions
                     (period,file_sha256,source_url,publication_date,source_values,notes)
                     VALUES (%s,%s,%s,%s,%s,%s)
-                """,(period,edition_sha,document["url"],date.today(),Jsonb(payload),
+                """,(period,edition_sha,document["url"],publication_date,Jsonb(payload),
                     "EC-021 append-only; automated source validated c1/c3/c4. Historical revisions blocked."))
                 cur.execute("INSERT INTO public.datos_comex ("+",".join(COLUMNS)+") VALUES ("+",".join(["%s"]*len(COLUMNS))+")",
                             (period,*(Decimal(values[k]) for k in AMOUNT_COLS)))
