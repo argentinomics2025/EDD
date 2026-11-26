@@ -8,10 +8,14 @@ from decimal import Decimal
 
 from scripts.ec021_isac_monthly import (
     FIELDS, SOURCE_COLUMNS, START, compare_published, dec, month_after,
-    month_before, parse_index, parse_inputs, source_report
+    month_before, target_month, parse_index, parse_inputs, source_report
 )
 
 class TestISACMonthly(unittest.TestCase):
+    def test_publication_lag_two_months(self):
+        self.assertEqual(target_month("2026-12"),date(2026,10,1))
+        self.assertEqual(target_month("2027-01"),date(2026,11,1))
+        self.assertEqual(target_month("2026-11"),date(2026,9,1))
     def test_month_math(self):
         self.assertEqual(month_before("2027-01"),date(2026,12,1))
         self.assertEqual(month_after(date(2026,12,1)),date(2027,1,1))
