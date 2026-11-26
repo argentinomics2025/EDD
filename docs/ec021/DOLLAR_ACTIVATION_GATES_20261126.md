@@ -84,3 +84,20 @@ SET LOCAL ROLE ec021_dollar_writer; ... ROLLBACK;`, sin activar LOGIN:
   por pooler ni prueba escritor conectado desde GitHub con credencial dedicada.
 - GitHub Actions PR#52 [45875712863](https://github.com/argentinomics2025/EDD/actions/runs/45875712863)
   **19/19 tests PASS**, consulta DolarAPI 7/7 real `applied=false`.
+
+## Protocolo privado para la prueba de conexión, sin habilitar escrituras
+1. En Supabase SQL Editor, asignar al rol `ec021_dollar_writer` LOGIN y una
+   contraseña nueva y única, sin compartirla en el chat:
+   `ALTER ROLE ec021_dollar_writer LOGIN PASSWORD '<contraseña propia>';`.
+2. En GitHub EDD → Settings → Secrets and variables → Actions, crear el
+   secreto `EC021_DOLLAR_DB_DSN` con URI del **Session pooler**, rol
+   `ec021_dollar_writer.<PROJECT_REF>`, SSL obligatorio. Codificar
+   caracteres reservados de la contraseña en la URI.
+3. En GitHub Actions lanzar `ec021_dollar_safe_writer.yml`, rama `main`,
+   `check_db=true`. Esperado: ambos jobs SUCCESS;
+   `mode=authenticated_read_only`, `db_role=ec021_dollar_writer`,
+   `applied=false`.
+4. **NO activar `EC021_DOLLAR_WRITES_ENABLED=true`** ni programar
+   escrituras hasta cumplir compuertas editoriales y operativas. Este
+   workflow no dispone de job de escritura ni calendario.
+5. Compartir solo URL/logs sin credenciales. Nunca enviar contraseña ni DSN.
