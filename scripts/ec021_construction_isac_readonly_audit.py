@@ -1,4 +1,4 @@
-"""EC-021 Construcción ISAC: official API vs stored index, audit only.
+"""EC-021 Construcción ISAC DESESTACIONALIZADO: official API vs stored index, audit only.
 
 Historical values may be revised and seasonally adjusted; never overwrite
 without documented matching series methodology and edition.
@@ -9,7 +9,7 @@ from decimal import Decimal
 import requests
 
 SOURCE="https://apis.datos.gob.ar/series/api/series"
-SERIES="33.2_ISAC_NIVELRAL_0_M_18_63"
+SERIES="33.2_ISAC_SIN_EDAD_0_M_23_56"
 DB="https://fvyzacodrrmlxgzhneyt.supabase.co/rest/v1/construccion_actividad"
 KEY="sb_publishable_32r2WZE28EI-O4aIP1D4Mw_fnwZ826j"
 
@@ -49,8 +49,11 @@ def assess(source,stored):
     if len(overlap)<3:raise ValueError("Insufficient matching periods")
     return {"mode":"read_only_audit","source":SOURCE,"series_id":SERIES,
             "latest_official_month":max(official),
+            "methodology":"INDEC ISAC base 2004=100, serie desestacionalizada",
             "latest_stored_month":max(seen),
             "overlap":overlap[:10],
+            "matched_count":sum(x["status"]=="matched" for x in overlap),
+            "compared_count":len(overlap),
             "writes_to_supabase":False,"revises_historical_values":False}
 
 def run(*,http=requests):
