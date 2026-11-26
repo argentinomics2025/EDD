@@ -88,28 +88,38 @@ def collect():
 
 
 def plan(quotes, board, history, today):
-    """Immutable-first-observed daily series and independently updated dashboard.
+    """Preserve dashboard and daily last observed values with immutable ledger.
 
-    Historical mismatches are reported, never updated. A historical record is
-    only appended for a new source day that equals today's Argentina date.
+    History is keyed by (ticker, quote day). Today's prices may be revised
+    only after a new source timestamp; yesterday and earlier are immutable.
     """
     if set(board) != set(quotes):
         raise ValueError("Board lacks required canonical tickers")
     desired_board = {}
     new_history = {}
-    conflicts = []
+    update_history = {}
+    seed_history = {}
+    changes = []
     for ticker, quote in quotes.items():
-        existing = board[ticker]
-        recorded = existing[2]
-        if recorded is None or quote["updated"] > recorded.astimezone(timezone.utc):
+        previous = board[ticker][2]
+        is_new = previous is None or quote["updated"] > previous.astimezone(timezone.utc)
+        if is_new:
             desired_board[ticker] = quote
         key = (ticker, quote["day"])
-        if key in history:
-            if history[key] != (quote["buy"], quote["sell"]):
-                conflicts.append(ticker)
-        elif quote["day"] == today:
-            new_history[ticker] = quote
-    return desired_board, new_history, sorted(conflicts)
+        recorded = history.get(key)
+        if recorded is None:
+            if quote["day"] == today:
+                new_history[ticker] = quote
+        elif recorded != (quote["buy"], quote["sell"]):
+            changes.append(ticker)
+            if quote["day"] == today and is_new:
+                update_history[ticker] = quote
+                seed_history[ticker] = {
+                    "buy": recorded[0], "sell": recorded[1],
+                    "updated": previous or datetime.now(timezone.utc),
+                    "day": today,
+                }
+    return desired_board, new_history, update_history, seed_history, sorted(changes)
 
 
 def run(*, check_db=False, apply=False):
@@ -148,11 +158,18 @@ def run(*, check_db=False, apply=False):
                 (list(quotes), days),
             )
             history = {(r[0], r[1]): (r[2], r[3]) for r in cur.fetchall()}
-            updates, inserts, conflicts = plan(quotes, board, history, today)
+            updates, inserts, revisions, seeds, conflicts = plan(
+                quotes, board, history, today
+            )
             result.update({
-                "db_role": role, "dashboard_updates_planned": len(updates),
+                "db_role": role,
+                "dashboard_updates_planned": len(updates),
                 "history_inserts_planned": len(inserts),
-                "history_existing_differences": conflicts,
+                "today_history_revisions_planned": len(revisions),
+                "historical_observations_differ": conflicts,
+                "intraday_events_planned": sum(
+                    quotes[t]["day"] == today for t in updates
+                ) + len(seeds),
             })
             if not apply:
                 conn.rollback()
@@ -160,7 +177,28 @@ def run(*, check_db=False, apply=False):
                 return result
             if os.getenv("EC021_DOLLAR_WRITES_ENABLED") != "true":
                 raise RuntimeError("Write kill switch disabled")
+            if any(q["updated"] > datetime.now(timezone.utc) for q in updates.values()):
+                raise RuntimeError("Future source timestamp")
+            # Changes to the same day's daily bar are always captured in the
+            # private append-only event ledger; older days are never updated.
+            for ticker, quote in seeds.items():
+                cur.execute(
+                    "INSERT INTO ec021_audit.dollar_intraday_observations "
+                    "(ticker,quote_day,source_updated,buy_value,sell_value,origin) "
+                    "VALUES (%s,%s,%s,%s,%s,'legacy_seed') "
+                    "ON CONFLICT(ticker,source_updated,origin) DO NOTHING",
+                    (ticker, quote["day"], quote["updated"],
+                     quote["buy"], quote["sell"]),
+                )
             for ticker, quote in updates.items():
+                if quote["day"] == today:
+                    cur.execute(
+                        "INSERT INTO ec021_audit.dollar_intraday_observations "
+                        "(ticker,quote_day,source_updated,buy_value,sell_value,origin) "
+                        "VALUES (%s,%s,%s,%s,%s,'dolarapi')",
+                        (ticker, quote["day"], quote["updated"],
+                         quote["buy"], quote["sell"]),
+                    )
                 cur.execute(
                     "UPDATE public.economic_indicators SET "
                     "buy_value=%s,sell_value=%s,last_updated=%s WHERE id=%s "
@@ -169,7 +207,7 @@ def run(*, check_db=False, apply=False):
                      quote["updated"]),
                 )
                 if cur.rowcount != 1:
-                    raise RuntimeError("Concurrent change in dashboard; rollback")
+                    raise RuntimeError("Concurrent dashboard change; rollback")
             for ticker, quote in inserts.items():
                 cur.execute(
                     "INSERT INTO public.historial_cotizaciones "
@@ -177,9 +215,18 @@ def run(*, check_db=False, apply=False):
                     "VALUES (%s,%s,%s,%s)",
                     (quote["day"], ticker, quote["buy"], quote["sell"]),
                 )
+            for ticker, quote in revisions.items():
+                cur.execute(
+                    "UPDATE public.historial_cotizaciones "
+                    "SET precio_compra=%s,precio_venta=%s "
+                    "WHERE fecha=%s AND ticker=%s",
+                    (quote["buy"], quote["sell"], today, ticker),
+                )
+                if cur.rowcount != 1:
+                    raise RuntimeError("Concurrent historical change; rollback")
             conn.commit()
-            result["applied"] = bool(updates or inserts)
-            result["mode"] = "atomic_append" if result["applied"] else "no_change"
+            result["applied"] = bool(updates or inserts or revisions)
+            result["mode"] = "atomic_versioned_daily" if result["applied"] else "no_change"
             return result
 
 
