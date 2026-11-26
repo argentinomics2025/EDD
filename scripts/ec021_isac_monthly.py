@@ -233,11 +233,47 @@ def insert_once(report, dsn):
                         "new_count":fingerprints["construccion_actividad"][0]+1,
                         "db_role":actor}
 
+def check_database_login(dsn):
+    """Read-only authentication and least-privilege smoke check, before release."""
+    import psycopg
+    with psycopg.connect(dsn,connect_timeout=12,sslmode="require") as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT current_user")
+            actor=cur.fetchone()[0]
+            if actor!=ROLE:
+                raise PermissionError("Expected dedicated EC021 ISAC role")
+            tables=("public.construccion_actividad","public.construccion_insumos",
+                    "ec021_audit.isac_source_editions")
+            values={}
+            for table in tables:
+                cur.execute("SELECT has_table_privilege(current_user,%s,'UPDATE'), has_table_privilege(current_user,%s,'DELETE'), has_table_privilege(current_user,%s,'INSERT')",(table,table,table))
+                upd,dele,ins=cur.fetchone()
+                if upd or dele or not ins:
+                    raise PermissionError("Writer must be INSERT-only for "+table)
+                cur.execute("SELECT count(*) FROM "+table)
+                values[table]=cur.fetchone()[0]
+            if values[tables[0]]<177 or values[tables[1]]<177:
+                raise ValueError("Insufficient ISAC existing history")
+            return {"status":"authenticated_read_only","db_role":actor,"applied":False,
+                    "activity_rows":values[tables[0]],"inputs_rows":values[tables[1]],
+                    "edition_rows":values[tables[2]]}
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--release-month",required=True)
     p.add_argument("--commit",action="store_true")
+    p.add_argument("--check-db",action="store_true")
     args=p.parse_args()
+    if args.commit and args.check_db:
+        raise ValueError("--commit and --check-db cannot be combined")
+    if args.check_db:
+        if os.environ.get("EC021_ISAC_WRITES_ENABLED")!="true":
+            raise PermissionError("ISAC activation variable missing")
+        dsn=os.environ.get("EC021_ISAC_DB_DSN")
+        if not dsn:
+            raise PermissionError("Dedicated ISAC database secret missing")
+        print(json.dumps(check_database_login(dsn),sort_keys=True))
+        return
     report=source_report(args.release_month)
     if not args.commit:
         print(json.dumps({"status":report["status"],"period":report["period"],
