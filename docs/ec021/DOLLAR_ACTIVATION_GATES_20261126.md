@@ -1,11 +1,67 @@
-# EC-021 Dolar - revision de seguridad (26/11/2026)
+# EC-021 — Dólar: evidencia, activación y criterios de aceptación
 
-**No apto para escrituras productivas sin revision de licencias y semantica historica.**
+**Estado al 26/11/2026: lector seguro integrado en main; escritor NO ACTIVADO.**
+PR #51 MERGED, squash SHA `96cc4bd693afac608647a0341632aba9dcc863a4`.
+CI run [45875202490](https://github.com/argentinomics2025/EDD/actions/runs/45875202490) SUCCESS:
+**17/17 pruebas**, consulta DolarAPI real 7/7 tickers, `applied=false`,
+fecha individual de fuente 26/11/2026.
 
-- Fuente agregada DolarAPI, siete cotizaciones; verificar terminos y permisos de terceras fuentes (DolarHoy/Ambito) y atribucion.
-- Nueva validacion fail-closed: 7 tickers, fecha con timezone, precio finito, antiguedad y completitud.
-- El escritor solo acepta rol ec021_dollar_writer, transaccion atomica, nunca UPDATE/DELETE del historial; si varia el precio diario ya registrado, aborta para evitar perdida de historicos.
-- El tablero economic_indicators exige UPDATE acotado a los siete IDs canonicos con reloj de la fuente, sujeto a permisos RLS.
-- No borrar dolar-bolsa legado.
-- En la primera version el workflow es solo lectura, manual, no hay cron ni ejecucion writer.
-- Pendientes: snapshot privado verificado, instalar rol NOLOGIN con permisos limitados, pruebas rollback y RLS, evaluar licencias y semantica de primera foto intradiaria, habilitacion privada de secret/variable, pruebas de escritor y alertas; luego evaluar frecuencia >= 3h y apagar cron viejo.
+## Fuente y licencia
+- API `https://dolarapi.com/v1/dolares`, siete pares compra/venta, fecha con zona
+  horaria en cada ticker; sus cambios de hora/día pueden diferir.
+- Condiciones DolarAPI (actualizadas 15/10/2026): se pueden consultar, conservar
+  copias y publicar trabajos basados en las respuestas **citando DolarAPI**;
+  frecuencia de referencia ~una consulta cada tres horas y por serie.
+  https://dolarapi.com/docs/uso
+- **Limitación de derechos:** esos términos no sustituyen la licencia de
+  terceros fuente (p.ej. DolarHoy y Ámbito). Verificar permiso comercial
+  aplicable antes de habilitar nueva republicación automatizada. La
+  atribución debe resultar visible en la web (frontend pendiente de revisión).
+- No etiquetar los siete precios como cotizaciones oficiales del BCRA.
+
+## Supabase, respaldo y seguridad verificada
+Migración `ec021_dollar_private_snapshots_scoped_nologin_20261126`:
+- `ec021_audit.dollar_board_snapshot_20261126`: 8 filas
+  (7 canónicas + `dolar-bolsa` legado) hash
+  `d33ef59cd4ed8addb96628dbc79a35e1`.
+- `ec021_audit.dollar_history_snapshot_20261126`: 11.189 filas,
+  hash `62a69278a106ffcc2e7a14aa94aa6638`.
+- Hashes vivos y snapshots iguales tras el merge.
+- Rol `ec021_dollar_writer`: **NOLOGIN**, NOINHERIT, NOBYPASSRLS.
+  Grants por columna: `SELECT` y `UPDATE` de precios/fecha solo pizarra,
+  `SELECT` e `INSERT` solo historial; jamás `UPDATE/DELETE` historial.
+  RLS limita a siete tickers y fechas futuras elegibles.
+- Consulta de privilegios catalogada: acceso por columna correcto,
+  DELETE prohibido. `SET ROLE` desde el conector administrativo es
+  denegado (42501); se requiere posterior validación PostgreSQL con rol propio.
+- No se modificaron precios ni fechas. `dolar-bolsa` no se borra.
+
+## Semántica económica que requiere aceptación
+El script legado reescribía el valor diario cada media hora, por lo que el
+histórico representa la **última observación de ese día**. El escritor nuevo
+evita reescrituras y propone **primera observación de cada día**. Son
+metodologías distintas y podrían alterar la comparación del gráfico si se
+cambia sin aprobación editorial. Alternativa: tabla adicional de observaciones
+intradiarias inmutable + vista diaria derivada, que preserva la semántica
+de último precio sin perder revisiones. **No decidir implícitamente.**
+
+## Despliegue por compuertas
+1. Resolver permisos de reutilización de fuentes terceros y cita visible.
+2. Acordar metodología de gráfico (primera vs última observación,
+   o ledger de snapshots intradiarios). Mantener DEC-003.
+3. Ejecutar en transacción descartable pruebas RLS/rollback con credencial
+   exclusiva `ec021_dollar_writer`; hoy no existe login ni secreto nuevo.
+4. Verificar comportamiento 7/7 en una fecha de publicación, idempotencia,
+   sin `UPDATE/DELETE` histórico, alertas, horario y ausencia de costos nuevos.
+5. Solo después habilitar secreto/kill switch y cron cada >=3 horas
+   sustituyendo **simultáneamente** el cron legado
+   `.github/workflows/robot_dolar.yml` (actualmente 30 min y clave
+   `SUPABASE_KEY` compartida). Nunca activar dos escritores en paralelo.
+6. Verificar en producción y en frontend 7 valores + fechas de fuente, y
+   segundo run `no_change`; dejar plan de reversión funcional.
+
+**Importante:** GitHub Actions `ec021_dollar_safe_writer.yml` solo se
+dispara en `workflow_dispatch` o PR. Solo tiene el job de pruebas y
+lector fuente. No hay job con `--apply`, cron ni secretos. El código contiene
+una función de escritura protegida para su futura habilitación, pero
+**el robot Dólar todavía NO está automatizado con el nuevo sistema**.
