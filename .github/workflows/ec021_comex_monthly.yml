@@ -3,7 +3,7 @@ name: EC-021 COMEX — monitor oficial y writer protegido
 on:
   schedule:
     # 20:13 UTC, ventana post-publicación y primeros días del mes siguiente
-    - cron: '13 20 20-28 * *'
+    - cron: '13 20 18-28 * *'
     - cron: '13 20 1-5 * *'
   workflow_dispatch:
     inputs:
@@ -100,7 +100,7 @@ jobs:
     needs: [monitor, writer]
     if: >-
       always() && github.event_name != 'pull_request' &&
-      (needs.monitor.result == 'failure' || needs.writer.result == 'failure')
+      (needs.monitor.result == 'failure' || needs.writer.result == 'failure' || (github.event_name == 'schedule' && needs.writer.result == 'skipped'))
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
@@ -120,7 +120,7 @@ jobs:
           title="EC-021 COMEX ${month}: monitor o writer falló"
           existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json title,number --jq '.[] | select(.title == "'"$title"'") | .number' | head -1)"
           if [ -z "$existing" ]; then
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "EC-021 COMEX fail-closed. Fecha $(date -u +%F). Monitor: ${MONITOR_RESULT}; escritor: ${WRITER_RESULT}. Revisar [run](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). Sin cargar ni reescribir históricos. No reactivar bot_comex.yml."
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "EC-021 COMEX fail-closed. Fecha $(date -u +%F). Monitor: ${MONITOR_RESULT}; escritor: ${WRITER_RESULT} (skipped en cron significa writer desactivado y requiere revisión). Revisar [run](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). Sin cargar ni reescribir históricos. No reactivar bot_comex.yml."
           else
             echo "Existing issue #$existing; deduplicated"
           fi
