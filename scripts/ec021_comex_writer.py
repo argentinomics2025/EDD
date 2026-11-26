@@ -28,7 +28,7 @@ def prev_month(period):
     return previous.replace(day=1)
 
 def next_month(period):
-    day=date.fromisoformat(period)
+    day=period if isinstance(period,date) else date.fromisoformat(period)
     return date(day.year+int(day.month==12),day.month%12+1,1)
 
 def compare_existing(existing, incoming, edition_hash, saved_hash):
