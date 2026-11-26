@@ -85,7 +85,7 @@ class TestImmutablePlan(unittest.TestCase):
         self.db = board(self.quotes)
 
     def test_new_daily_snapshots(self):
-        updates, new, differences = plan(self.quotes, self.db, {}, TODAY)
+        updates, new, revisions, seeds, differences = plan(self.quotes, self.db, {}, TODAY)
         self.assertEqual(len(updates), 7)
         self.assertEqual(len(new), 7)
         self.assertEqual(differences, [])
@@ -93,28 +93,53 @@ class TestImmutablePlan(unittest.TestCase):
     def test_rerun_does_not_insert(self):
         history = {(t, TODAY): (q["buy"], q["sell"])
                    for t, q in self.quotes.items()}
-        updates, new, differences = plan(self.quotes, self.db, history, TODAY)
+        updates, new, revisions, seeds, differences = plan(self.quotes, self.db, history, TODAY)
         self.assertEqual(len(new), 0)
+        self.assertEqual(len(revisions), 0)
         self.assertEqual(differences, [])
         self.assertEqual(len(updates), 7)
 
     def test_intraday_difference_not_overwritten(self):
         history = {("dolar-blue", TODAY): (Decimal("1"), Decimal("2"))}
-        updates, new, differences = plan(self.quotes, self.db, history, TODAY)
+        updates, new, revisions, seeds, differences = plan(self.quotes, self.db, history, TODAY)
         self.assertEqual(differences, ["dolar-blue"])
+        self.assertIn("dolar-blue", revisions)
+        self.assertIn("dolar-blue", seeds)
         self.assertNotIn("dolar-blue", new)
         self.assertIn("dolar-blue", updates)
 
     def test_old_source_day_never_added_to_history(self):
         self.quotes["dolar-blue"]["day"] = date(2026, 11, 25)
-        _, new, _ = plan(self.quotes, self.db, {}, TODAY)
+        _, new, _, _, _ = plan(self.quotes, self.db, {}, TODAY)
         self.assertNotIn("dolar-blue", new)
 
     def test_stale_board_update_disallowed(self):
         self.db["dolar-blue"] = (
             None, None, datetime(2026, 11, 26, 20, tzinfo=timezone.utc))
-        updates, _, _ = plan(self.quotes, self.db, {}, TODAY)
+        updates, _, _, _, _ = plan(self.quotes, self.db, {}, TODAY)
         self.assertNotIn("dolar-blue", updates)
+
+    def test_changed_old_day_must_not_modify_history(self):
+        self.quotes["dolar-blue"]["day"] = date(2026, 11, 25)
+        old = {("dolar-blue", date(2026, 11, 25)):
+               (Decimal("2"), Decimal("3"))}
+        _, _, revisions, seeds, differences = plan(
+            self.quotes, self.db, old, TODAY
+        )
+        self.assertIn("dolar-blue", differences)
+        self.assertNotIn("dolar-blue", revisions)
+        self.assertNotIn("dolar-blue", seeds)
+
+    def test_same_day_identical_values_never_revised(self):
+        old = {("dolar-blue", TODAY):
+               (self.quotes["dolar-blue"]["buy"],
+                self.quotes["dolar-blue"]["sell"])}
+        _, _, revisions, seeds, differences = plan(
+            self.quotes, self.db, old, TODAY
+        )
+        self.assertNotIn("dolar-blue", revisions)
+        self.assertNotIn("dolar-blue", seeds)
+        self.assertEqual(differences, [])
 
     def test_missing_db_ticker_fails(self):
         self.db.pop("dolar-blue")

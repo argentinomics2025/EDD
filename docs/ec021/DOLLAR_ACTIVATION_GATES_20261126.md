@@ -36,19 +36,22 @@ Migración `ec021_dollar_private_snapshots_scoped_nologin_20261126`:
   denegado (42501); se requiere posterior validación PostgreSQL con rol propio.
 - No se modificaron precios ni fechas. `dolar-bolsa` no se borra.
 
-## Semántica económica que requiere aceptación
-El script legado reescribía el valor diario cada media hora, por lo que el
-histórico representa la **última observación de ese día**. El escritor nuevo
-evita reescrituras y propone **primera observación de cada día**. Son
-metodologías distintas y podrían alterar la comparación del gráfico si se
-cambia sin aprobación editorial. Alternativa: tabla adicional de observaciones
-intradiarias inmutable + vista diaria derivada, que preserva la semántica
-de último precio sin perder revisiones. **No decidir implícitamente.**
+## Semántica económica y registro intradiario
+La serie histórica existente presenta la **última cotización observada del día**
+(el robot antiguo reemplaza cada fecha). Para conservar esta metodología, se
+preparó la tabla privada `ec021_audit.dollar_intraday_observations`, con
+observaciones versionadas por `(ticker, source_updated, origin)`.
+La actualización de una fila diaria existente se permite únicamente **el mismo
+día** y requiere, mediante trigger, un registro inmutable del valor previo y
+uno del nuevo valor. No se permite alterar días anteriores. La pizarra
+solo adelanta al recibir un timestamp de fuente estrictamente posterior.
+El nuevo escritor y su ledger continúan sin activarse; falta aceptar esta
+metodología y probarla bajo rol PostgreSQL real en un rollback aislado.
 
 ## Despliegue por compuertas
 1. Resolver permisos de reutilización de fuentes terceros y cita visible.
-2. Acordar metodología de gráfico (primera vs última observación,
-   o ledger de snapshots intradiarios). Mantener DEC-003.
+2. Validar como política editorial continuidad de la metodología histórica
+   de última cotización diaria con ledger de versiones inmutable; DEC-003.
 3. Ejecutar en transacción descartable pruebas RLS/rollback con credencial
    exclusiva `ec021_dollar_writer`; hoy no existe login ni secreto nuevo.
 4. Verificar comportamiento 7/7 en una fecha de publicación, idempotencia,
@@ -65,3 +68,19 @@ dispara en `workflow_dispatch` o PR. Solo tiene el job de pruebas y
 lector fuente. No hay job con `--apply`, cron ni secretos. El código contiene
 una función de escritura protegida para su futura habilitación, pero
 **el robot Dólar todavía NO está automatizado con el nuevo sistema**.
+
+## Ensayo PostgreSQL reversible — 26/11/2026
+Se probó dentro de `BEGIN; GRANT ec021_dollar_writer TO CURRENT_USER;
+SET LOCAL ROLE ec021_dollar_writer; ... ROLLBACK;`, sin activar LOGIN:
+- SELECT con RLS: visibles solo los siete IDs canónicos de `economic_indicators`.
+- Se insertaron eventos sintéticos previo+nuevo en el ledger privado.
+- UPDATE de `historial_cotizaciones` exclusivamente de la fecha actual
+  **pasó** cuando el trigger encontró las dos versiones en el ledger.
+- INSERT retroactivo de fecha 24/11/2026 fue **rechazado** por RLS.
+- UPDATE de indicador ajeno `riesgo-pais` afectó **cero filas**.
+- `ROLLBACK` restauró el contexto `postgres`, dejó ledger en **0 filas**
+  y mantuvo historial en **11.189 filas**, sin un solo dato de prueba persistente.
+- Esto valida comportamiento RLS y trigger, **NO** valida todavía login
+  por pooler ni prueba escritor conectado desde GitHub con credencial dedicada.
+- GitHub Actions PR#52 [45875712863](https://github.com/argentinomics2025/EDD/actions/runs/45875712863)
+  **19/19 tests PASS**, consulta DolarAPI 7/7 real `applied=false`.
