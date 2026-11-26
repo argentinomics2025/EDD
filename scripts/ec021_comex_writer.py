@@ -41,16 +41,23 @@ def compare_existing(existing, incoming, edition_hash, saved_hash):
         raise ValueError("ICA XLS edition hash changed: retain histories and review new edition")
     return "no_change"
 
+def official_edition_date(url):
+    """Use the filename's publication date; never infer from runner's clock."""
+    match=re.fullmatch(
+        r"https://www\.indec\.gob\.ar/ftp/cuadros/economia/ica_cuadros_(\d{2})_(\d{2})_(\d{2})\.xls",
+        url,
+    )
+    if not match:
+        raise ValueError("Unknown official ICA edition date")
+    return date(2000+int(match[3]),int(match[2]),int(match[1]))
+
 def insert_only(document, dsn):
     import psycopg
     from psycopg.types.json import Jsonb
     values=document["values"]
     period=date.fromisoformat(values["fecha"])
     edition_sha=document["sha256"]
-    url_date=re.search(r"ica_cuadros_(\d{2})_(\d{2})_(\d{2})\.xls$",document["url"])
-    if not url_date:
-        raise ValueError("Unknown official ICA edition date")
-    publication_date=date(2000+int(url_date[3]),int(url_date[2]),int(url_date[1]))
+    publication_date=official_edition_date(document["url"])
     if publication_date.year != period.year+int(period.month==12) or publication_date.month != (period.month%12+1):
         raise ValueError("Release-month/period mismatch")
     with psycopg.connect(dsn, connect_timeout=12, sslmode="require") as conn:
