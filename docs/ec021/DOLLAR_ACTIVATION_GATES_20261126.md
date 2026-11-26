@@ -68,3 +68,19 @@ dispara en `workflow_dispatch` o PR. Solo tiene el job de pruebas y
 lector fuente. No hay job con `--apply`, cron ni secretos. El código contiene
 una función de escritura protegida para su futura habilitación, pero
 **el robot Dólar todavía NO está automatizado con el nuevo sistema**.
+
+## Ensayo PostgreSQL reversible — 26/11/2026
+Se probó dentro de `BEGIN; GRANT ec021_dollar_writer TO CURRENT_USER;
+SET LOCAL ROLE ec021_dollar_writer; ... ROLLBACK;`, sin activar LOGIN:
+- SELECT con RLS: visibles solo los siete IDs canónicos de `economic_indicators`.
+- Se insertaron eventos sintéticos previo+nuevo en el ledger privado.
+- UPDATE de `historial_cotizaciones` exclusivamente de la fecha actual
+  **pasó** cuando el trigger encontró las dos versiones en el ledger.
+- INSERT retroactivo de fecha 24/11/2026 fue **rechazado** por RLS.
+- UPDATE de indicador ajeno `riesgo-pais` afectó **cero filas**.
+- `ROLLBACK` restauró el contexto `postgres`, dejó ledger en **0 filas**
+  y mantuvo historial en **11.189 filas**, sin un solo dato de prueba persistente.
+- Esto valida comportamiento RLS y trigger, **NO** valida todavía login
+  por pooler ni prueba escritor conectado desde GitHub con credencial dedicada.
+- GitHub Actions PR#52 [45875712863](https://github.com/argentinomics2025/EDD/actions/runs/45875712863)
+  **19/19 tests PASS**, consulta DolarAPI 7/7 real `applied=false`.
