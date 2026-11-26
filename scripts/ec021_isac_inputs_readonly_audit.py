@@ -62,12 +62,13 @@ def analyze(text, stored):
             published = Decimal(str(dbrow[field]))
             if not official.is_finite() or not published.is_finite():
                 raise ValueError("Non finite construction input")
-            aligned.append((when, abs(official-published)))
+            aligned.append((when, abs(official-published), str(official), str(published)))
         if aligned:
-            match = sum(err <= Decimal("0.051") for _,err in aligned)
+            match = sum(err <= Decimal("0.051") for _,err,_,_ in aligned)
             comparisons.append({"field":field,"compared":len(aligned),"matched_with_rounding":match,
                                 "mismatched":len(aligned)-match,
-                                "latest_absolute_difference":str(aligned[0][1])})
+                                "latest_absolute_difference":str(aligned[0][1]),
+                                "mismatch_samples":[{"fecha":when,"source":src,"db":db,"difference":str(diff)} for when,diff,src,db in aligned if diff > Decimal("0.051")][:3]})
     return {"mode":"read_only",
             "source":SOURCE,"source_rows":len(rows),"last_official":max(sources),
             "last_stored":max(x["fecha"] for x in stored),
