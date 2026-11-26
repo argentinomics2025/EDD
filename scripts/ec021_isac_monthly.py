@@ -12,6 +12,7 @@ import os
 import re
 from datetime import date, timedelta
 from decimal import Decimal
+from urllib.parse import urlparse
 
 import requests
 
@@ -43,9 +44,9 @@ def fetch(url, *, params=None, limit=4_000_000, http=requests):
     if not url.startswith(("https://apis.datos.gob.ar/series/api/series",
                            "https://infra.datos.gob.ar/catalog/sspm/dataset/33/distribution/33.3/download/")):
         raise ValueError("Unexpected source host")
-    r=http.get(url,params=params,headers=HEADERS,timeout=35,allow_redirects=False)
+    r=http.get(url,params=params,headers=HEADERS,timeout=35,allow_redirects=True)
     r.raise_for_status()
-    if r.is_redirect or not r.content or len(r.content)>limit:
+    if urlparse(r.url).scheme != "https" or urlparse(r.url).hostname not in {"apis.datos.gob.ar","infra.datos.gob.ar"} or len(r.history)>2 or not r.content or len(r.content)>limit:
         raise ValueError("Source missing, redirected or oversized")
     return r.content,hashlib.sha256(r.content).hexdigest()
 
