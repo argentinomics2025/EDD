@@ -1,11 +1,16 @@
-name: "EC-021 Dolar safe writer - read-only until authorization"
+name: "EC-021 Dólar - fuente y autenticación de solo lectura"
 on:
   workflow_dispatch:
+    inputs:
+      check_db:
+        description: "Probar autenticación de rol dedicado SIN escrituras"
+        type: boolean
+        default: false
   pull_request:
     paths:
-      - 'scripts/ec021_dollar_safe_writer.py'
-      - 'tests/test_ec021_dollar_safe_writer.py'
-      - '.github/workflows/ec021_dollar_safe_writer.yml'
+      - "scripts/ec021_dollar_safe_writer.py"
+      - "tests/test_ec021_dollar_safe_writer.py"
+      - ".github/workflows/ec021_dollar_safe_writer.yml"
 permissions:
   contents: read
 jobs:
@@ -19,5 +24,21 @@ jobs:
           python-version: "3.11"
       - run: pip install requests "psycopg[binary]>=3.2,<4"
       - run: python -m unittest discover -s tests -p 'test_ec021_dollar_safe_writer.py' -v
-      - run: python -m scripts.ec021_dollar_safe_writer
-# No schedule, DB secret, or production writer job until separate licensing and credential review.
+      - name: Validar las siete cotizaciones sin escrituras
+        run: python -m scripts.ec021_dollar_safe_writer
+  connection_check:
+    needs: test_and_monitor
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.check_db == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests "psycopg[binary]>=3.2,<4"
+      - name: Comprobar rol exclusivo sin modificar Supabase
+        env:
+          EC021_DOLLAR_DB_DSN: ${{ secrets.EC021_DOLLAR_DB_DSN }}
+        run: python -m scripts.ec021_dollar_safe_writer --check-db
+# No automatic cron or writer job. EC021_DOLLAR_WRITES_ENABLED is unused here.
