@@ -1,0 +1,147 @@
+name: EC-021 ISAC — fuente oficial y escritor doble INSERT-only
+on:
+  schedule:
+    - cron: '11 20 9-24 * *'
+    - cron: '11 20 1-3 * *'
+  workflow_dispatch:
+    inputs:
+      release_month:
+        description: 'Mes de publicación YYYY-MM; vacío = mes calendario'
+        type: string
+        required: false
+      apply:
+        description: 'Intentar escrituras en ambas tablas (requiere rol exclusivo y kill switch)'
+        type: boolean
+        default: false
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/ec021_isac_monthly.py
+      - tests/test_ec021_isac_monthly.py
+      - .github/workflows/ec021_isac_monthly.yml
+permissions:
+  contents: read
+concurrency:
+  group: ec021-isac-monthly
+  cancel-in-progress: false
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    outputs:
+      release_month: ${{ steps.period.outputs.value }}
+      source_status: ${{ steps.read.outputs.status }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned reader
+        run: python -m pip install --disable-pip-version-check 'requests==2.34.2'
+      - name: Synthetic fail-closed tests
+        run: python -m unittest discover -s tests -p 'test_ec021_isac_monthly.py' -v
+      - name: Resolve release month
+        id: period
+        env:
+          RELEASE: ${{ inputs.release_month }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            month="2026-11"
+          elif [ -n "$RELEASE" ]; then
+            month="$RELEASE"
+          elif [ "$(date -u +%d)" -le 3 ]; then
+            month="$(date -u -d 'last month' +%Y-%m)"
+          else
+            month="$(date -u +%Y-%m)"
+          fi
+          if ! [[ "$month" =~ ^20[0-9]{2}-(0[1-9]|1[0-2])$ ]]; then
+            echo "::error::Invalid ISAC month"; exit 1
+          fi
+          echo "value=$month" >> "$GITHUB_OUTPUT"
+      - name: Read both official source series, without secrets
+        id: read
+        run: |
+          set -euo pipefail
+          python -m scripts.ec021_isac_monthly --release-month "${{ steps.period.outputs.value }}" | tee /tmp/isac_source.json
+          python -c "import json; d=json.load(open('/tmp/isac_source.json')); print('status='+d['status'],file=open('$GITHUB_OUTPUT','a'))"
+  auth_check:
+    needs: monitor
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      vars.EC021_ISAC_WRITES_ENABLED == 'true' &&
+      github.event_name == 'workflow_dispatch' && inputs.apply == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: ec021-isac-writer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned auth client
+        run: python -m pip install --disable-pip-version-check 'requests==2.34.2' 'psycopg[binary]==3.2.9'
+      - name: Validate role and database privileges without writes
+        env:
+          EC021_ISAC_WRITES_ENABLED: ${{ vars.EC021_ISAC_WRITES_ENABLED }}
+          EC021_ISAC_DB_DSN: ${{ secrets.EC021_ISAC_DB_DSN }}
+        run: python -m scripts.ec021_isac_monthly --release-month "${{ needs.monitor.outputs.release_month }}" --check-db
+
+  writer:
+    needs: monitor
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      vars.EC021_ISAC_WRITES_ENABLED == 'true' &&
+      needs.monitor.outputs.source_status == 'source_ready' &&
+      (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.apply == true))
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: ec021-isac-writer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned writer
+        run: python -m pip install --disable-pip-version-check 'requests==2.34.2' 'psycopg[binary]==3.2.9'
+      - name: Atomic two-table append-only, never UPDATE/DELETE
+        env:
+          EC021_ISAC_WRITES_ENABLED: ${{ vars.EC021_ISAC_WRITES_ENABLED }}
+          EC021_ISAC_DB_DSN: ${{ secrets.EC021_ISAC_DB_DSN }}
+        run: python -m scripts.ec021_isac_monthly --release-month "${{ needs.monitor.outputs.release_month }}" --commit
+  alert:
+    needs: [monitor, writer, auth_check]
+    if: >-
+      always() && github.event_name != 'pull_request' &&
+      (needs.monitor.result == 'failure' || needs.writer.result == 'failure' || needs.auth_check.result == 'failure' ||
+      (github.event_name == 'schedule' && needs.monitor.outputs.source_status == 'source_ready' && needs.writer.result == 'skipped'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or deduplicate alert issue for publication month
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ needs.monitor.outputs.release_month }}
+          MONITOR: ${{ needs.monitor.result }}
+          WRITER: ${{ needs.writer.result }}
+        run: |
+          set -euo pipefail
+          month="$TARGET"
+          if [ -z "$month" ]; then month="$(date -u +%Y-%m)"; fi
+          if ! [[ "$month" =~ ^20[0-9]{2}-(0[1-9]|1[0-2])$ ]]; then month="$(date -u +%Y-%m)"; fi
+          title="EC-021 ISAC $month: monitor o writer falló"
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json title,number --jq '.[] | select(.title == "'"$title"'") | .number' | head -1)"
+          if [ -z "$existing" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "EC021 ISAC fail-closed $(date -u +%F): monitor=$MONITOR, writer=$WRITER. [Run](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). No overwrite ni doble escritor; mantener legacy apagado."
+          else
+            echo "Issue $existing deduplicated"
+          fi
