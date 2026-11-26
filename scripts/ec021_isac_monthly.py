@@ -37,6 +37,11 @@ def month_before(period):
     d=date.fromisoformat(period+"-01")
     return (d-timedelta(days=1)).replace(day=1)
 
+def target_month(release_month):
+    """INDEC publishes ISAC two calendar months after the reference month."""
+    previous=month_before(release_month)
+    return (previous-timedelta(days=1)).replace(day=1)
+
 def month_after(d):
     return date(d.year+int(d.month==12),d.month%12+1,1)
 
@@ -88,7 +93,7 @@ def parse_inputs(content):
 def source_report(release_month, *, http=requests):
     if not re.fullmatch(r"20\d{2}-(0[1-9]|1[0-2])",release_month):
         raise ValueError("Invalid release month")
-    target=month_before(release_month)
+    target=target_month(release_month)
     index_bytes,index_sha=fetch(INDEX_URL,params={"ids":SERIES,"limit":500,"format":"json"},http=http)
     inputs_bytes,inputs_sha=fetch(INPUTS_URL,http=http)
     index,inputs=parse_index(index_bytes),parse_inputs(inputs_bytes)
@@ -97,6 +102,10 @@ def source_report(release_month, *, http=requests):
     common={d for d in index if d in inputs}
     if not common:
         raise ValueError("No overlapping official sources")
+    if target<START:
+        return {"status":"baseline_read_only","period":target.isoformat(),
+                "last_activity":max(index).isoformat(),"last_inputs":max(inputs).isoformat(),
+                "writes_to_supabase":False}
     missing=(target not in index,target not in inputs)
     if any(missing):
         if missing[0] != missing[1]:
