@@ -1,0 +1,42 @@
+name: "EC-021 Dólar - monitoreo diario seguro"
+on:
+  workflow_dispatch:
+  schedule:
+    # 19:35 de Argentina, lunes a viernes; el writer legado corre hasta las 17:00.
+    - cron: "35 22 * * 1-5"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ec021_dollar_health.yml"
+permissions:
+  contents: read
+concurrency:
+  group: ec021-dollar-daily-readonly
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Leer siete cotizaciones y comparar pizarra sin escritura
+        run: python -m scripts.ec021_dollar_health
+  alert:
+    needs: inspect
+    if: ${{ always() && needs.inspect.result == 'failure' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      issues: write
+    steps:
+      - name: Registrar alerta en issue EC-021 Dólar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_RUN_ID: ${{ github.run_id }}
+        run: |
+          gh issue comment 33 --repo "$GH_REPO" --body "⚠️ EC-021 Dólar: falló el monitor programado de lectura y/o hay cotizaciones almacenadas con más de 12 horas de atraso respecto de DolarAPI. Revisar ejecución https://github.com/$GH_REPO/actions/runs/$GH_RUN_ID . Ninguna escritura ejecutada por este workflow."
