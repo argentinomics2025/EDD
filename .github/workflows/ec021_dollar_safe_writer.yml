@@ -10,6 +10,11 @@ on:
         description: "Ejecutar el escritor y comprobar segunda corrida idempotente"
         type: boolean
         default: false
+  pull_request:
+    paths:
+      - '.github/workflows/ec021_dollar_safe_writer.yml'
+      - '.github/workflows/robot_dolar.yml'
+      - 'tests/test_ec021_dollar_legacy_safety.py'
   push:
     branches: [main]
     paths:
