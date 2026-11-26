@@ -2,6 +2,7 @@ import os
 import datetime
 import requests
 from supabase import create_client
+from scripts.ec021_dollar_safe_writer import validate
 
 # --- CREDENCIALES ---
 URL = os.environ.get("SUPABASE_URL")
@@ -29,6 +30,8 @@ def run():
         r.raise_for_status()
         
         data = r.json()
+        # Fail closed before any DB writes if the source is incomplete/stale.
+        validate(data)
         hoy = hora_actual.date().isoformat()
         
         for d in data:
@@ -54,7 +57,7 @@ def run():
                     'last_updated': hora_actual.isoformat()
                 }).execute()
             except Exception as e:
-                print(f"      ⚠️ Error actualizando pizarra para {ticker}: {e}")
+                raise RuntimeError(f"Error actualizando pizarra para {ticker}") from e
             
             # 2. ACTUALIZAR HISTORIAL (El Gráfico)
             try:
@@ -77,14 +80,14 @@ def run():
                         'precio_venta': venta
                     }).execute()
             except Exception as e:
-                print(f"      ⚠️ Error actualizando historial para {ticker}: {e}")
+                raise RuntimeError(f"Error actualizando historial para {ticker}") from e
                 
         print("\n🚀 ¡Circuito del Dólar completado con éxito!")
         
     except requests.exceptions.RequestException as e:
-        print(f"⚠️ Error de red al consultar DolarAPI: {e}")
+        raise RuntimeError("Error de red al consultar DolarAPI") from e
     except Exception as e:
-        print(f"❌ Error General: {e}")
+        raise RuntimeError("Error General en robot dolar") from e
 
 if __name__ == '__main__':
     run()

@@ -9,6 +9,9 @@ on:
   pull_request:
     paths:
       - "scripts/ec021_dollar_safe_writer.py"
+      - "scripts/actualizar_dolar.py"
+      - ".github/workflows/robot_dolar.yml"
+      - "tests/test_ec021_dollar_legacy_safety.py"
       - "tests/test_ec021_dollar_safe_writer.py"
       - ".github/workflows/ec021_dollar_safe_writer.yml"
 permissions:
@@ -23,7 +26,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install requests "psycopg[binary]>=3.2,<4"
-      - run: python -m unittest discover -s tests -p 'test_ec021_dollar_safe_writer.py' -v
+      - run: python -m unittest discover -s tests -p 'test_ec021_dollar_*.py' -v
       - name: Validar las siete cotizaciones sin escrituras
         run: python -m scripts.ec021_dollar_safe_writer
   connection_check:
