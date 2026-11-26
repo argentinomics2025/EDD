@@ -33,6 +33,8 @@ def main():
             found.append({"url":url,"year":int("20"+m[3]),"month":int(m[2]),"day":int(m[1])})
     found.sort(key=lambda x:(x["year"],x["month"],x["day"]),reverse=True)
     print(json.dumps({"official_index":INDEX,"links_checked":len(parsed.urls),"latest_xls":found[:3],"writes_to_supabase":False},ensure_ascii=False))
-    if not found:raise ValueError("No official XLS link in index; fail closed")
+    if not found:
+        print(json.dumps({"public_links":parsed.urls[:40]},ensure_ascii=False))
+        raise ValueError("No official XLS link in index; fail closed")
 
 if __name__=="__main__":main()
