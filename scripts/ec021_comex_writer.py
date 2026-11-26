@@ -47,7 +47,7 @@ def insert_only(document, dsn):
     values=document["values"]
     period=date.fromisoformat(values["fecha"])
     edition_sha=document["sha256"]
-    url_date=re.search(r"ica_cuadros_(\\d{2})_(\\d{2})_(\\d{2})\\.xls$",document["url"])
+    url_date=re.search(r"ica_cuadros_(\d{2})_(\d{2})_(\d{2})\.xls$",document["url"])
     if not url_date:
         raise ValueError("Unknown official ICA edition date")
     publication_date=date(2000+int(url_date[3]),int(url_date[2]),int(url_date[1]))
