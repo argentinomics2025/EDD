@@ -12,4 +12,5 @@ jobs:
     steps:
       - name: Fail closed
         run: |
-          echo "COMEX legacy BLOQUEADO: sin cargas ni secretos. Usar ec021_comex_readonly.yml para verificar fuente."
+          echo "::error::COMEX legacy BLOQUEADO: flujo deshabilitado para proteger los históricos; NO se realizó carga."
+          exit 1
