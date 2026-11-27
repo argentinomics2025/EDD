@@ -1,0 +1,108 @@
+name: EC-021 Agro — FOB diario MAGyP y escritor protegido
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/ec021_agro_fob_writer.py
+      - tests/test_ec021_agro_fob_writer.py
+      - .github/workflows/ec021_agro_fob_daily.yml
+  schedule:
+    - cron: '17 22 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      check_db:
+        type: boolean
+        description: 'Solo probar rol exclusivo sin escrituras'
+        required: false
+        default: false
+      apply:
+        type: boolean
+        description: 'Permitir inserción si la edición es realmente nueva'
+        required: false
+        default: false
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: ec021-agro-fob-exclusive
+  cancel-in-progress: false
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run strict offline MAGyP and writer tests
+        run: |
+          python -m unittest discover -s tests -p 'test_ec021_agro_magyp_fob.py' -v
+          python -m unittest discover -s tests -p 'test_ec021_agro_fob_writer.py' -v
+      - name: Verify official current FOB publication without secrets
+        run: python -m scripts.ec021_agro_magyp_fob_reader --latest
+  auth_check:
+    needs: monitor
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.check_db == true && inputs.apply != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    environment: ec021-agro-fob-writer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned DB driver
+        run: python -m pip install --disable-pip-version-check 'psycopg[binary]==3.2.9'
+      - name: Validate role and idempotence with read-only session
+        env:
+          EC021_AGRO_FOB_DB_DSN: ${{ secrets.EC021_AGRO_FOB_DB_DSN }}
+        run: python -m scripts.ec021_agro_fob_writer --check-db
+  writer:
+    needs: monitor
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      vars.EC021_AGRO_FOB_WRITES_ENABLED == 'true' &&
+      (github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && inputs.apply == true))
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    environment: ec021-agro-fob-writer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned DB driver
+        run: python -m pip install --disable-pip-version-check 'psycopg[binary]==3.2.9'
+      - name: Persist only a complete NEW four-product official date
+        env:
+          EC021_AGRO_FOB_DB_DSN: ${{ secrets.EC021_AGRO_FOB_DB_DSN }}
+          EC021_AGRO_FOB_WRITES_ENABLED: ${{ vars.EC021_AGRO_FOB_WRITES_ENABLED }}
+        run: python -m scripts.ec021_agro_fob_writer --commit
+  alert:
+    needs: [monitor,writer,auth_check]
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      (needs.monitor.result == 'failure' ||
+        needs.writer.result == 'failure' ||
+        needs.auth_check.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Create traceable failure notification in EC-021 Agro issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          gh issue comment 70 -R "$REPO" --body "EC-021 Agro: fuente MAGyP o writer FOB falló. Ver ejecución https://github.com/$REPO/actions/runs/$RUN_ID. No se utilizaron Yahoo ni valores alternativos ni se modificó datos_agro."
