@@ -20,4 +20,4 @@ jobs:
         with:
           python-version: '3.11'
       - name: Check official daily API JSON response without DB or secrets
-        run: python -m scripts.ec021_agro_magyp_probe --date 2026-11-25
+        run: python -m scripts.ec021_agro_magyp_probe --date 2026-11-27
