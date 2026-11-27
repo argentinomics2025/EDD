@@ -25,6 +25,20 @@ create table public.ec022_aprobaciones (
 );
 create index on public.ec022_aprobaciones (serie, periodo, evento desc);
 
+-- Serialize decisions for the same observation period. The identity default
+-- is assigned before BEFORE triggers, so replace it only after taking the lock.
+create function public.ec022_ordenar_aprobacion() returns trigger
+language plpgsql security invoker set search_path = pg_catalog, public as $$
+begin
+  perform pg_advisory_xact_lock(hashtextextended(new.serie || ':' || new.periodo::text, 0));
+  new.evento := nextval('public.ec022_aprobaciones_evento_seq'::regclass);
+  return new;
+end $$;
+revoke all on function public.ec022_ordenar_aprobacion() from public;
+grant execute on function public.ec022_ordenar_aprobacion() to ec022_validador;
+create trigger ec022_aprobacion_orden before insert on public.ec022_aprobaciones
+for each row execute function public.ec022_ordenar_aprobacion();
+
 alter table public.ec022_series enable row level security;
 alter table public.ec022_observaciones enable row level security;
 alter table public.ec022_aprobaciones enable row level security;
