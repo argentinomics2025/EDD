@@ -1,0 +1,39 @@
+name: EC-021 Energía — validación offline sin credenciales
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/ec021_energy_validation.py
+      - scripts/actualizar_energia.py
+      - tests/test_ec021_energy_validation.py
+      - .github/workflows/robot_energia.yml
+      - .github/workflows/ec021_energia_validation.yml
+permissions:
+  contents: read
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run fail-closed offline validation
+        run: python -m unittest discover -s tests -p 'test_ec021_energy_validation.py' -v
+      - name: Verify legacy writer is disabled, without loading secrets
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          w = Path(".github/workflows/robot_energia.yml").read_text()
+          l = Path("scripts/actualizar_energia.py").read_text()
+          assert "schedule:" not in w, "legacy cron still enabled"
+          assert "SUPABASE_KEY" not in w
+          assert "disabled:" in w and "if:" in w and "false" in w
+          assert "ENERGIA_LEGACY_DISABLED" in l
+          assert ".delete(" not in l and ".insert(" not in l
+          print("EC021_ENERGIA_LEGACY_FAIL_CLOSED_PASS")
+          PY
