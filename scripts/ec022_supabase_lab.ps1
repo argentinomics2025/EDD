@@ -1,4 +1,4 @@
-#requires -Version 7.0
+﻿#requires -Version 7.0
 <# Local-only EC-022 laboratory. It never links to a hosted project and never
    stops or destroys any stack. It creates a fresh named stack and directory.
    Local connection details are kept in process memory, not printed or saved. #>
@@ -19,7 +19,7 @@ if (-not $psql -and (Test-Path 'C:/Program Files/PostgreSQL/17/bin/psql.exe')) {
     $psql = 'C:/Program Files/PostgreSQL/17/bin/psql.exe'
 }
 if (-not $psql) { throw 'psql.exe is required to run the SQL integration tests.' }
-& docker version --format '{{.Server.Version}}' *> $null
+& docker version --format '{{.Server.Version}}'
 if ($LASTEXITCODE -ne 0) { throw 'Docker daemon is not reachable; no laboratory was created.' }
 
 $id = 'ec022lab' + [guid]::NewGuid().ToString('N').Substring(0,12)
@@ -33,12 +33,12 @@ $oldDisposable = $env:EC022_DISPOSABLE_TEST_CLUSTER
 try {
     $env:SUPABASE_EXPERIMENTAL_STACK = '1'
     Write-Host "Creating isolated local EC-022 laboratory: $id"
-    & npx.cmd --yes supabase@3.4.0 init --workdir $lab *> $null
+    & npx.cmd --yes supabase@3.4.0 init --workdir $lab
     if ($LASTEXITCODE -ne 0) { throw 'Supabase init failed.' }
-    $config = Join-Path $lab 'supabase/config.toml'
+    $config = Join-Path $lab 'supabase/config.jsonc'
     if (-not (Test-Path -LiteralPath $config)) { throw 'Local configuration was not created.' }
     # Explicit unique stack and root: never select or stop ec021-restore-test.
-    $start = (& npx.cmd --yes supabase@3.4.0 stack start --workdir $lab --stack $id --runtime docker --output-format json 2>$null | Out-String)
+    $start = (& npx.cmd --yes supabase@3.4.0 stack start --workdir $lab --stack $id --runtime docker --output-format json | Out-String)
     if ($LASTEXITCODE -ne 0) { throw 'Local Supabase start failed; see Docker Desktop for the isolated stack state.' }
     $status = $start | ConvertFrom-Json
     $dbUrl = [string]$status.env.DB_URL
@@ -57,17 +57,17 @@ try {
 
     # Generate the migration with the CLI in this isolated root, then apply only
     # to its explicitly named local stack. The prototype remains unapproved.
-    & npx.cmd --yes supabase@3.4.0 migration new ec022_lab_candidate --workdir $lab *> $null
+    & npx.cmd --yes supabase@3.4.0 migration new ec022_lab_candidate --workdir $lab
     if ($LASTEXITCODE -ne 0) { throw 'Could not create local migration file.' }
     $migration = @(Get-ChildItem -LiteralPath (Join-Path $lab 'supabase/migrations') -Filter '*_ec022_lab_candidate.sql')
     if ($migration.Count -ne 1) { throw 'Migration candidate is not unique.' }
     Copy-Item -LiteralPath $prototype -Destination $migration[0].FullName
-    & npx.cmd --yes supabase@3.4.0 migration up --workdir $lab --stack $id *> $null
+    & npx.cmd --yes supabase@3.4.0 migration up --workdir $lab --stack $id
     if ($LASTEXITCODE -ne 0) { throw 'Candidate migration failed on the local EC-022 stack.' }
     Write-Host 'Local candidate migration applied; running SQL permissions and rollback tests.'
     & $psql -X -h $uri.Host -p $uri.Port -U postgres -d postgres -v ON_ERROR_STOP=1 -f $sqlTests
     if ($LASTEXITCODE -ne 0) { throw 'SQL integration test failed.' }
-    & $psql -X -h $uri.Host -p $uri.Port -U postgres -d postgres -v ON_ERROR_STOP=1 -c "set role ec022_validador; insert into public.ec022_aprobaciones (serie,periodo,fuente_sha256,accion,motivo) values ('test','2020-01-01',repeat('b',64),'aprobar','API test');" *> $null
+    & $psql -X -h $uri.Host -p $uri.Port -U postgres -d postgres -v ON_ERROR_STOP=1 -c "set role ec022_validador; insert into public.ec022_aprobaciones (serie,periodo,fuente_sha256,accion,motivo) values ('test','2020-01-01',repeat('b',64),'aprobar','API test');"
     if ($LASTEXITCODE -ne 0) { throw 'Could not prepare local API test.' }
     $apiUrl = [string]$status.env.API_URL
     $anonKey = [string]$status.env.ANON_KEY
@@ -78,7 +78,7 @@ try {
     $headers = @{ apikey = $anonKey; Authorization = "Bearer $anonKey" }
     try {
         $publicRows = @((Invoke-RestMethod -Uri "$apiUrl/rest/v1/ec022_observaciones?select=serie,valor&serie=eq.test" -Headers $headers -MaximumRedirection 0) | ForEach-Object { $_ })
-    } catch { throw 'Local public read API failed.' }
+    } catch { throw "Local public read API failed: $($_.Exception.Message)" }
     if ($publicRows.Count -ne 1 -or [decimal]$publicRows[0].valor -ne 101) {
         throw 'Local API did not return exactly the approved edition.'
     }

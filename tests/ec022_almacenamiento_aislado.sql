@@ -1,5 +1,14 @@
 \set ON_ERROR_STOP on
 -- Run only on an isolated PostgreSQL cluster with the prototype already installed.
+do $$ begin
+ if has_function_privilege('anon','public.ec022_ingestar_observacion(text,date,text,numeric,text,timestamptz,date)','EXECUTE')
+    or has_function_privilege('authenticated','public.ec022_ingestar_observacion(text,date,text,numeric,text,timestamptz,date)','EXECUTE')
+    or not has_function_privilege('ec022_ingestor','public.ec022_ingestar_observacion(text,date,text,numeric,text,timestamptz,date)','EXECUTE')
+    or not has_function_privilege('anon','ec022_privado.es_publicada(text,date,text)','EXECUTE')
+ then raise exception 'unsafe function privileges'; end if;
+ if exists (select 1 from pg_roles where rolname in ('ec022_lector_aprobaciones','ec022_escritor_funcion') and (rolcanlogin or rolbypassrls or rolsuper))
+ then raise exception 'unsafe function owner role'; end if;
+end $$;
 insert into public.ec022_series (serie,fuente,frecuencia,unidad,moneda,base,definicion) values ('test','test','monthly','index',null,'test','test');
 set role ec022_ingestor;
 do $$ begin

@@ -73,10 +73,24 @@ returns boolean language sql stable security definer set search_path = pg_catalo
     from public.ec022_aprobaciones a
     where a.serie=p_serie and a.periodo=p_periodo order by a.evento desc limit 1), false)
 $$;
-alter function ec022_privado.es_publicada(text,date,text) owner to ec022_lector_aprobaciones;
-revoke create on schema ec022_privado from ec022_lector_aprobaciones;
 revoke all on function ec022_privado.es_publicada(text,date,text) from public;
 grant execute on function ec022_privado.es_publicada(text,date,text) to anon, authenticated;
+-- PostgreSQL 16+ requires SET membership to transfer ownership. The role
+-- creator receives ADMIN but not necessarily SET; grant it only for the
+-- transfer, do not inherit privileges, and revoke this grant immediately.
+-- PostgreSQL may retain its automatic ADMIN-only creator membership; verify
+-- that the executing non-superuser cannot SET or inherit the owner role.
+grant ec022_lector_aprobaciones to current_user with set true, inherit false;
+alter function ec022_privado.es_publicada(text,date,text) owner to ec022_lector_aprobaciones;
+revoke ec022_lector_aprobaciones from current_user;
+do $$ begin
+ if not (select rolsuper from pg_roles where rolname=current_user)
+    and (pg_has_role(current_user,'ec022_lector_aprobaciones','SET')
+         or pg_has_role(current_user,'ec022_lector_aprobaciones','USAGE')) then
+   raise exception 'temporary reader-owner privileges remain';
+ end if;
+end $$;
+revoke create on schema ec022_privado from ec022_lector_aprobaciones;
 create policy ec022_observaciones_publicas on public.ec022_observaciones for select to anon, authenticated
   using (ec022_privado.es_publicada(serie,periodo,fuente_sha256));
 
@@ -102,8 +116,17 @@ begin
  values(p_serie,p_periodo,p_hash,p_valor,p_url,p_recuperado,p_publicacion);
  return 'inserted';
 end $$;
-grant create on schema public to ec022_escritor_funcion;
-alter function public.ec022_ingestar_observacion(text,date,text,numeric,text,timestamptz,date) owner to ec022_escritor_funcion;
-revoke create on schema public from ec022_escritor_funcion;
 revoke all on function public.ec022_ingestar_observacion(text,date,text,numeric,text,timestamptz,date) from public;
 grant execute on function public.ec022_ingestar_observacion(text,date,text,numeric,text,timestamptz,date) to ec022_ingestor;
+grant create on schema public to ec022_escritor_funcion;
+grant ec022_escritor_funcion to current_user with set true, inherit false;
+alter function public.ec022_ingestar_observacion(text,date,text,numeric,text,timestamptz,date) owner to ec022_escritor_funcion;
+revoke ec022_escritor_funcion from current_user;
+do $$ begin
+ if not (select rolsuper from pg_roles where rolname=current_user)
+    and (pg_has_role(current_user,'ec022_escritor_funcion','SET')
+         or pg_has_role(current_user,'ec022_escritor_funcion','USAGE')) then
+   raise exception 'temporary writer-owner privileges remain';
+ end if;
+end $$;
+revoke create on schema public from ec022_escritor_funcion;
