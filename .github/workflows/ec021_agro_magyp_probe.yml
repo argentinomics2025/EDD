@@ -1,0 +1,27 @@
+name: EC-021 Agro — inspección real de API FOB MAGyP sin escrituras
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/ec021_agro_magyp_probe.py
+      - scripts/ec021_agro_magyp_fob_reader.py
+      - tests/test_ec021_agro_magyp_fob.py
+      - .github/workflows/ec021_agro_magyp_probe.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate official response semantics without any network access
+        run: python -m unittest discover -s tests -p 'test_ec021_agro_magyp_fob.py' -v
+      - name: Verify actual Ministry FOB circular and four shipment-matched products
+        run: python -m scripts.ec021_agro_magyp_fob_reader --latest
