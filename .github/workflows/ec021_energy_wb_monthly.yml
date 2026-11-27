@@ -1,0 +1,99 @@
+name: EC-021 Energía — monitor mensual Banco Mundial y writer exclusivo
+on:
+  schedule:
+    - cron: '17 21 2-10 * *'
+  workflow_dispatch:
+    inputs:
+      apply:
+        type: boolean
+        required: false
+        default: false
+        description: 'Escribir con rol exclusivo si la edición es nueva'
+      check_db:
+        type: boolean
+        required: false
+        default: false
+        description: 'Comprobar conectividad writer, sin escritura'
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: ec021-energy-wb-monthly
+  cancel-in-progress: false
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify contract, data model and writer guards offline
+        run: |
+          python -m unittest discover -s tests -p 'test_ec021_energy_worldbank.py' -v
+          python -m unittest discover -s tests -p 'test_ec021_energy_wb_writer.py' -v
+      - name: Compare official latest monthly prices (no DB secrets)
+        run: python -m scripts.ec021_energy_worldbank --check-source
+  auth_check:
+    needs: monitor
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.check_db == true &&
+      vars.EC021_ENERGY_WB_WRITES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: ec021-energy-wb-writer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned PostgreSQL driver
+        run: python -m pip install --disable-pip-version-check 'psycopg[binary]==3.2.9'
+      - name: Check exclusive writer role in SELECT-only transaction
+        env:
+          EC021_ENERGY_WB_DB_DSN: ${{ secrets.EC021_ENERGY_WB_DB_DSN }}
+        run: python -m scripts.ec021_energy_wb_writer --check-db
+  writer:
+    needs: monitor
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      vars.EC021_ENERGY_WB_WRITES_ENABLED == 'true' &&
+      (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.apply == true))
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    environment: ec021-energy-wb-writer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned PostgreSQL driver
+        run: python -m pip install --disable-pip-version-check 'psycopg[binary]==3.2.9'
+      - name: Insert precisely one new monthly batch, no UPDATE or DELETE
+        env:
+          EC021_ENERGY_WB_WRITES_ENABLED: ${{ vars.EC021_ENERGY_WB_WRITES_ENABLED }}
+          EC021_ENERGY_WB_DB_DSN: ${{ secrets.EC021_ENERGY_WB_DB_DSN }}
+        run: python -m scripts.ec021_energy_wb_writer --commit
+  alert:
+    needs: [monitor, writer, auth_check]
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      (needs.monitor.result == 'failure' || needs.writer.result == 'failure' || needs.auth_check.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Alert to documented Energy issue #62
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: gh issue comment 62 -R "$REPO" --body "EC-021 Energía: error en monitor/writer Banco Mundial. Revisar ejecución https://github.com/$REPO/actions/runs/$RUN_ID. Sin fallback de datos y sin escrituras legacy."
