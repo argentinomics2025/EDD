@@ -1,0 +1,39 @@
+name: EC-021 Agro — resguardo de datos y corte seguro
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/actualizar_agro.py
+      - .github/workflows/robot_agro.yml
+      - .github/workflows/ec021_agro_safety.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check legacy writer fail-closed without secrets
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess, sys
+          w=Path('.github/workflows/robot_agro.yml').read_text()
+          s=Path('scripts/actualizar_agro.py').read_text()
+          assert 'schedule:' not in w
+          assert 'SUPABASE_KEY' not in w
+          assert 'if: ' in w and 'false' in w
+          assert 'EC021_AGRO_LEGACY_DISABLED' in s
+          for x in ['.delete(', '.insert(', '1050.0', 'SUPABASE_KEY', 'query2.finance.yahoo.com']:
+              assert x not in s, x
+          p=subprocess.run([sys.executable,'scripts/actualizar_agro.py'],capture_output=True,text=True)
+          assert p.returncode != 0 and 'EC021_AGRO_LEGACY_DISABLED' in p.stderr
+          print('EC021_AGRO_LEGACY_GUARDS_PASS')
+          PY
