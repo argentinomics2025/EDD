@@ -21,6 +21,10 @@ class DecisionTests(unittest.TestCase):
     def test_partial_stored_month_fails_closed(self):
         with self.assertRaises(SourceError):
             decide(PRICE,STORED[:2],"2026-11-01","2026-11")
+    def test_reject_stale_source_after_new_database_month(self):
+        with self.assertRaises(SourceError):
+            decide(PRICE, STORED, "2026-12-01", "2026-11")
+
     def test_no_bootstrap_unapproved(self):
         with self.assertRaises(SourceError):
             decide(PRICE,[],None,"2026-11")
