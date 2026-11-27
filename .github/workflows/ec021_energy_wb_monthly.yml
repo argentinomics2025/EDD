@@ -43,7 +43,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' &&
       inputs.check_db == true &&
-      vars.EC021_ENERGY_WB_WRITES_ENABLED == 'true'
+      inputs.apply != true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: ec021-energy-wb-writer
