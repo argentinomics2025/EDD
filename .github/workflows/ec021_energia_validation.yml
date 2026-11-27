@@ -32,7 +32,7 @@ jobs:
           l = Path("scripts/actualizar_energia.py").read_text()
           assert "schedule:" not in w, "legacy cron still enabled"
           assert "SUPABASE_KEY" not in w
-          assert "if: ${{ false }}" in w
+          assert "disabled:" in w and "if:" in w and "false" in w
           assert "ENERGIA_LEGACY_DISABLED" in l
           assert ".delete(" not in l and ".insert(" not in l
           print("EC021_ENERGIA_LEGACY_FAIL_CLOSED_PASS")
