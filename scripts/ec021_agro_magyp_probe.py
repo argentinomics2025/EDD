@@ -33,9 +33,9 @@ def probe(day: dt.date) -> dict:
                 summary = summarize(parsed)
                 posts = parsed.get("posts", []) if isinstance(parsed, dict) else []
                 samples = {}
-                for prefix in ("1001", "1005", "1201", "1206"):
+                for prefix in ("100199", "1005", "1201", "1206"):
                     matches = [x for x in posts if isinstance(x, dict) and str(x.get("posicion", "")).startswith(prefix)]
-                    samples[prefix] = {"count": len(matches), "sample": [
+                    samples[prefix] = {"count": len(matches), "codes": sorted(set(str(v.get("posicion")) for v in matches)), "sample": [
                         {key: v.get(key) for key in ("fecha", "circular", "posicion", "precio", "mesDesde", "añoDesde", "mesHasta", "añoHasta")}
                         for v in matches[:12]]}
                 return {"date_requested": day.isoformat(), "provider_host": final.hostname, "by_hs": samples,
