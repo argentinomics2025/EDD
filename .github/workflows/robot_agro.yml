@@ -1,34 +1,13 @@
-name: 🚜 Robot Agropecuario (Rosario)
-
+# EC-021: Legacy Yahoo/BCR-scraping writer disabled.
+# Do not run until source and write security have been independently validated.
+name: EC-021 Agro — escritor heredado deshabilitado
 on:
-  workflow_dispatch: 
-  schedule:
-    # Corre una vez por hora, desde las 11:00 hasta las 17:00 hs (ARG), de Lunes a Viernes
-    # (El reloj de GitHub usa UTC, por eso de 14:00 a 20:00)
-    - cron: '0 14-20 * * 1-5' 
-
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  actualizar-agro:
-    name: Extraer Cotizaciones
+  disabled:
+    if: ${{ false }}
     runs-on: ubuntu-latest
-
     steps:
-    - name: Descargar el código
-      uses: actions/checkout@v4
-
-    - name: Configurar Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-
-    - name: Instalar librerías
-      run: |
-        python -m pip install --upgrade pip
-        pip install supabase requests
-
-    - name: Arrancar Tractor 🚜
-      env:
-        TZ: 'America/Argentina/Buenos_Aires'
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-      run: python scripts/actualizar_agro.py
+      - run: echo "EC021_AGRO_LEGACY_DISABLED"
