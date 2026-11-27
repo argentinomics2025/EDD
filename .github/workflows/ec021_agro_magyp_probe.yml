@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - scripts/ec021_agro_magyp_probe.py
+      - scripts/ec021_agro_magyp_fob_reader.py
+      - tests/test_ec021_agro_magyp_fob.py
       - .github/workflows/ec021_agro_magyp_probe.yml
   workflow_dispatch:
 permissions:
@@ -19,5 +21,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Check official daily API JSON response without DB or secrets
-        run: python -m scripts.ec021_agro_magyp_probe --date 2026-11-27
+      - name: Validate official response semantics without any network access
+        run: python -m unittest discover -s tests -p 'test_ec021_agro_magyp_fob.py' -v
+      - name: Verify actual Ministry FOB circular and four shipment-matched products
+        run: python -m scripts.ec021_agro_magyp_fob_reader --date 2026-11-27
