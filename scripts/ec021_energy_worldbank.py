@@ -166,16 +166,26 @@ def parse_monthly(data: bytes, *, today: dt.date | None = None) -> dict:
         if dt.date(year, month, 1) > dt.date(today.year, today.month, 1):
             raise SourceError("Future monthly price period")
         items = []
+        # World Bank history starts in 1960, while some benchmarks were
+        # introduced decades later. Skip incomplete EARLY history only.
+        # The most recent 36 months must remain complete and strictly valid.
+        recent = (today.year - year) * 12 + today.month - month <= 36
+        unavailable = False
         for asset, (col, unit) in mapping.items():
             raw = row.get(col, "")
             try:
                 price = float(raw)
             except (ValueError, TypeError):
-                raise SourceError("Missing or nonnumeric monthly reference price") from None
+                if not recent:
+                    unavailable = True
+                    break
+                raise SourceError("Missing or nonnumeric recent monthly reference price") from None
             if not math.isfinite(price) or price <= 0:
                 raise SourceError("Invalid monthly reference price")
             items.append({"asset": asset, "period": f"{year:04d}-{month:02d}",
                           "value": price, "unit": unit})
+        if unavailable:
+            continue
         period_key = (year, month)
         if period_key in months:
             raise SourceError("Duplicated month")
