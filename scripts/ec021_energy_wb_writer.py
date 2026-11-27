@@ -90,7 +90,6 @@ def run(*, apply: bool = False, check_db: bool = False) -> dict:
                     )
                 # A check is not a write. Never let it accidentally persist.
                 if not apply:
-                    conn.rollback()
                     report.update({"status": "db_checked_read_only", "db_role": EXPECTED_ROLE,
                                    "next_action": status, "applied": False})
                     return report
