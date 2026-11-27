@@ -11,6 +11,9 @@ on:
       - "scripts/ec021_bcra_official_readonly_audit.py"
       - "tests/test_ec021_bcra_official_readonly_audit.py"
   workflow_dispatch:
+  schedule:
+    # BCRA publica por variable; observar después del antiguo cron de 23 UTC.
+    - cron: '30 23 * * *'
 permissions:
   contents: read
 jobs:
@@ -32,3 +35,19 @@ jobs:
       - name: Real official BCRA vs public Supabase, no writes
         if: github.event_name != 'pull_request'
         run: python -m scripts.ec021_bcra_official_readonly_audit
+
+  alert:
+    needs: read_only
+    if: ${{ always() && needs.read_only.result == 'failure' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      issues: write
+    steps:
+      - name: Reportar auditoría oficial con error en issue BCRA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_RUN_ID: ${{ github.run_id }}
+        run: |
+          gh issue comment 58 --repo "$GH_REPO" --body "⚠️ EC-021 BCRA: falló auditoría programada de solo lectura de API oficial vs Supabase. Ver https://github.com/$GH_REPO/actions/runs/$GH_RUN_ID . Sin escrituras por este workflow."
