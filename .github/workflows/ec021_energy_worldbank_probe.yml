@@ -1,0 +1,29 @@
+name: EC-021 Energía — Banco Mundial mensual (solo lectura)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/ec021_energy_worldbank.py
+      - tests/test_ec021_energy_worldbank.py
+      - .github/workflows/ec021_energy_worldbank_probe.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ec021-energy-wb-source-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  test-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate fail-closed XLSX parser without external dependencies
+        run: python -m unittest discover -s tests -p 'test_ec021_energy_worldbank.py' -v
+      - name: Read official World Bank workbook without secrets or DB access
+        run: python -m scripts.ec021_energy_worldbank --check-source
