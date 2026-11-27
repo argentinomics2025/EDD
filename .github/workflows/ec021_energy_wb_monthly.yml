@@ -96,4 +96,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
-        run: gh issue comment 62 -R "$REPO" --body "EC-021 Energía: error en monitor/writer Banco Mundial. Revisar ejecución https://github.com/$REPO/actions/runs/$RUN_ID. Sin fallback de datos y sin escrituras legacy."
+        run: |
+          gh issue comment 62 -R "$REPO" --body "EC-021 Energía: error en monitor/writer Banco Mundial. Revisar ejecución https://github.com/$REPO/actions/runs/$RUN_ID. Sin fallback de datos y sin escrituras legacy."
