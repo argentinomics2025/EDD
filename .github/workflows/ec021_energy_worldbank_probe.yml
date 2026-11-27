@@ -5,6 +5,8 @@ on:
     paths:
       - scripts/ec021_energy_worldbank.py
       - tests/test_ec021_energy_worldbank.py
+      - scripts/ec021_energy_wb_writer.py
+      - tests/test_ec021_energy_wb_writer.py
       - .github/workflows/ec021_energy_worldbank_probe.yml
   workflow_dispatch:
 permissions:
@@ -25,5 +27,7 @@ jobs:
           python-version: '3.11'
       - name: Validate fail-closed XLSX parser without external dependencies
         run: python -m unittest discover -s tests -p 'test_ec021_energy_worldbank.py' -v
+      - name: Validate exclusive append-only writer decisions without credentials
+        run: python -m unittest discover -s tests -p 'test_ec021_energy_wb_writer.py' -v
       - name: Read official World Bank workbook without secrets or DB access
         run: python -m scripts.ec021_energy_worldbank --check-source
