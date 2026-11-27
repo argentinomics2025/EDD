@@ -1,8 +1,12 @@
 """Only run against a disposable local cluster initialized by the test operator."""
 import os,threading,time,psycopg
+from psycopg.conninfo import conninfo_to_dict
 if os.environ.get('EC022_DISPOSABLE_TEST_CLUSTER') != 'yes':
  raise SystemExit('Refusing to run without EC022_DISPOSABLE_TEST_CLUSTER=yes')
-DSN='host=127.0.0.1 port=58494 dbname=postgres user=ec022_admin'
+DSN=os.environ.get('EC022_TEST_DSN','')
+parts=conninfo_to_dict(DSN)
+if parts.get('host') not in ('localhost','127.0.0.1','::1') or not parts.get('port'):
+ raise SystemExit('Refusing non-local test database')
 ready=threading.Event(); outcomes=[]
 def one(value,wait):
  try:
