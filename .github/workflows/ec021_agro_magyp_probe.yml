@@ -1,0 +1,23 @@
+name: EC-021 Agro — inspección real de API FOB MAGyP sin escrituras
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/ec021_agro_magyp_probe.py
+      - .github/workflows/ec021_agro_magyp_probe.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check official daily API JSON response without DB or secrets
+        run: python -m scripts.ec021_agro_magyp_probe --date 2026-11-25
