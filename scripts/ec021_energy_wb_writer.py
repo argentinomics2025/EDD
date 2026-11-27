@@ -30,6 +30,8 @@ def decide(latest: list[dict], existing: list[dict], current_max: str | None, pe
         raise SourceError("Incomplete official source batch")
     if any(x["period"] != period or x["unit"] != EXPECTED[x["asset"]] for x in latest):
         raise SourceError("Inconsistent period or commodity unit")
+    if current_max is not None and current_max[:7] > period:
+        raise SourceError("Database contains newer month than source")
     if existing:
         if len(existing) != 3 or {x["serie"] for x in existing} != set(EXPECTED):
             raise SourceError("Partial or duplicate database month")
