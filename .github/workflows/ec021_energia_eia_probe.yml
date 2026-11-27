@@ -1,0 +1,25 @@
+name: EC-021 Energía — prueba REAL EIA (solo lectura)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ec021-energy-eia-readonly
+  cancel-in-progress: false
+jobs:
+  real-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate EIA contracts offline
+        run: python -m unittest discover -s tests -p 'test_ec021_energy*.py' -v
+      - name: Read three EIA spot prices with dedicated API key, never write
+        env:
+          EC021_EIA_API_KEY: ${{ secrets.EC021_EIA_API_KEY }}
+        run: python -m scripts.ec021_energy_eia_reader --check-source
