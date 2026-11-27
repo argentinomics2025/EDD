@@ -15,9 +15,14 @@ on:
       - "scripts/ec021_bcra_safe_writer.py"
       - "tests/test_ec021_bcra_safe_writer.py"
       - ".github/workflows/ec021_bcra_safe_writer.yml"
+  schedule:
+    # 20:00 AR (23 UTC), el mismo horario que el robot legado.
+    - cron: '0 23 * * *'
   push:
     branches: [main]
     paths:
+      - ".github/workflows/robot_bcra.yml"
+      - "tests/test_ec021_bcra_cutover.py"
       - "scripts/ec021_bcra_safe_writer.py"
       - "tests/test_ec021_bcra_safe_writer.py"
       - ".github/workflows/ec021_bcra_safe_writer.yml"
@@ -37,10 +42,49 @@ jobs:
           python-version: "3.11"
       - name: Instalar dependencias
         run: python -m pip install 'requests>=2.31,<3' 'psycopg[binary]>=3.2,<4'
-      - name: Probar 14 condiciones económicas y de seguridad
-        run: python -m unittest discover -s tests -p 'test_ec021_bcra_safe_writer.py' -v
+      - name: Probar seguridad económica, origen y cutover
+        run: python -m unittest discover -s tests -p 'test_ec021_bcra_*.py' -v
       - name: Leer API BCRA v4.0 real (sin DML)
         run: python -m scripts.ec021_bcra_safe_writer
+
+  cutover_readiness:
+    needs: preflight
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Exigir bandera de escritura previamente aprobada
+        env:
+          BCRA_WRITES_ENABLED: ${{ vars.EC021_BCRA_WRITES_ENABLED }}
+        run: |
+          if [ "$BCRA_WRITES_ENABLED" != "true" ]; then
+            echo "::error::Falta habilitar la variable EC021_BCRA_WRITES_ENABLED=true; NO realizar cutover"
+            exit 1
+          fi
+          echo "EC021_BCRA_FLAG_CONFIRMED"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install 'requests>=2.31,<3' 'psycopg[binary]>=3.2,<4'
+      - name: Verificar rol y 5 series en Supabase sin DML
+        env:
+          EC021_BCRA_DB_DSN: ${{ secrets.EC021_BCRA_DB_DSN }}
+        run: |
+          set -euo pipefail
+          python -m scripts.ec021_bcra_safe_writer --check-db | tee /tmp/bcra-readiness.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out=json.loads(Path('/tmp/bcra-readiness.json').read_text())
+          if (out.get('mode') != 'authenticated_read_only'
+                  or out.get('db_role') != 'ec021_bcra_writer'
+                  or out.get('anomalies') != {}
+                  or out.get('series') != 5):
+              raise SystemExit('BCRA READINESS REJECTED')
+          print('EC021_BCRA_CUTOVER_READY')
+          PY
+
   check_connection:
     needs: preflight
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.check_db == true && inputs.apply != true }}
@@ -58,7 +102,7 @@ jobs:
         run: python -m scripts.ec021_bcra_safe_writer --check-db
   guarded_writer:
     needs: preflight
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.apply == true && vars.EC021_BCRA_WRITES_ENABLED == 'true' }}
+    if: ${{ vars.EC021_BCRA_WRITES_ENABLED == 'true' && (github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.apply == true)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -89,3 +133,19 @@ jobs:
               raise SystemExit('BCRA replay not idempotent')
           print('EC021_BCRA_IDEMPOTENT_REPLAY_PASS')
           PY
+
+  alert:
+    needs: [preflight, guarded_writer]
+    if: ${{ always() && (needs.preflight.result == 'failure' || needs.guarded_writer.result == 'failure') && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      issues: write
+    steps:
+      - name: Reportar falla del BCRA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_RUN_ID: ${{ github.run_id }}
+        run: |
+          gh issue comment 58 --repo "$GH_REPO" --body "⚠️ EC-021 BCRA: preflight o escritor exclusivo falló. Ver https://github.com/$GH_REPO/actions/runs/$GH_RUN_ID . No volver a habilitar el robot antiguo sin revisión."
