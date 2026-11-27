@@ -1,33 +1,13 @@
-name: 🛢️ Robot Energía (Wall Street)
-
+# EC-021: archived legacy writer. No schedule, credentials or runnable jobs.
+# Yahoo futures licensing, destructive DELETE+INSERT and shared key are not acceptable.
+name: EC-021 Energía — robot heredado deshabilitado
 on:
-  workflow_dispatch: 
-  schedule:
-    # Corre una vez por hora de 10 a 17 hs (ARG) (En UTC: 13 a 20)
-    - cron: '15 13-20 * * 1-5' 
-
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  actualizar-energia:
-    name: Extraer Commodities
+  disabled:
+    if: ${{ false }}
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Descargar el código
-      uses: actions/checkout@v4
-      
-    - name: Configurar Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-        
-    - name: Instalar librerías
-      run: |
-        python -m pip install --upgrade pip
-        pip install supabase requests
-        
-    - name: Arrancar Perforadora 🛢️
-      env:
-        TZ: 'America/Argentina/Buenos_Aires'
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-      run: python scripts/actualizar_energia.py
+      - run: echo "Legacy energy writer intentionally disabled"
