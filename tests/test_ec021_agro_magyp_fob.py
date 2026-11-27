@@ -53,7 +53,7 @@ class TestMAGYP(unittest.TestCase):
         x=copy.deepcopy(GOOD);x["posts"][0]["circular"]="2108"
         self.assert_bad(x)
     def test_wrong_period(self):
-        x=copy.deepcopy(GOOD);x["posts"][0]["mesHasta"]=10
+        x=copy.deepcopy(GOOD);x["posts"][0]["mesHasta"]=10; x["posts"][0]["añoHasta"]=2026
         self.assert_bad(x)
     def test_reject_short_not_real_json(self):
         self.assert_bad({"posts":[]})
