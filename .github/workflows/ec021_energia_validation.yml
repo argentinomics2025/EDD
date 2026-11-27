@@ -5,8 +5,10 @@ on:
     branches: [main]
     paths:
       - scripts/ec021_energy_validation.py
+      - scripts/ec021_energy_eia_reader.py
+      - tests/test_ec021_energy_eia_reader.py
       - scripts/actualizar_energia.py
-      - tests/test_ec021_energy_validation.py
+      - tests/test_ec021_energy*.py
       - .github/workflows/robot_energia.yml
       - .github/workflows/ec021_energia_validation.yml
 permissions:

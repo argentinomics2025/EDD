@@ -33,3 +33,6 @@ Se agregó validador offline scripts/ec021_energy_validation.py: rechaza fuente 
 Revertir únicamente este PR reintroduciría escritor viejo y peligroso: **NO recomendado** mientras no existan permisos de datos y reemplazo protegido. Para restaurar actualizaciones, usar exclusivamente nuevo robot validado, nunca script DELETE+INSERT.
 
 Fuente: https://www.eia.gov/opendata/ ; políticas de Yahoo: https://legal.yahoo.com/us/en/yahoo/terms/product-atos/apitnc/index.html
+
+## Lector EIA opcional preparado
+Nuevo `scripts/ec021_energy_eia_reader.py` consulta por HTTPS exclusivamente `api.eia.gov` con clave privada `EC021_EIA_API_KEY` y valida payload, serie, período, cobertura y precios. No expone token en logs ni hace INSERT/UPDATE/DELETE. Prueba real manual en `.github/workflows/ec021_energia_eia_probe.yml`, sin programación ni rol PostgreSQL. Tests de respuestas sintéticas en `tests/test_ec021_energy_eia_reader.py`. **No se ha ejecutado lectura real porque falta clave del usuario**; parámetros y disponibilidad deben validarse con salida real antes de autorizar writer.
