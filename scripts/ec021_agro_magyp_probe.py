@@ -31,7 +31,14 @@ def probe(day: dt.date) -> dict:
                 raw = data.decode("utf-8-sig")
                 parsed = json.loads(raw)
                 summary = summarize(parsed)
-                return {"date_requested": day.isoformat(), "provider_host": final.hostname,
+                posts = parsed.get("posts", []) if isinstance(parsed, dict) else []
+                samples = {}
+                for prefix in ("1001", "1005", "1201", "1206"):
+                    matches = [x for x in posts if isinstance(x, dict) and str(x.get("posicion", "")).startswith(prefix)]
+                    samples[prefix] = {"count": len(matches), "sample": [
+                        {key: v.get(key) for key in ("fecha", "circular", "posicion", "precio", "mesDesde", "añoDesde", "mesHasta", "añoHasta")}
+                        for v in matches[:12]]}
+                return {"date_requested": day.isoformat(), "provider_host": final.hostname, "by_hs": samples,
                         "content_type": ctype, "size_bytes": len(data),
                         "shape": summary, "applied": False}
         except Exception as exc:
