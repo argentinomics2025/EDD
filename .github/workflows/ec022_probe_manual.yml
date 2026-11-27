@@ -1,0 +1,17 @@
+name: EC-022 probe manual de fuentes oficiales
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r requirements-ec022.txt
+      - run: python -m unittest tests.test_ec022_readonly tests.test_ec022_indec_salarios tests.test_ec022_cvs tests.test_ec022_bcra_hipotecarios tests.test_ec022_ripte_historico tests.test_ec022_ipc
+      - run: python -m scripts.ec022_probe
