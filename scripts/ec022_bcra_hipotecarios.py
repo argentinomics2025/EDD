@@ -47,6 +47,8 @@ def parse(raw, filename):
         dates = sorted(rows[key])
         missing_months = sum((b.year-a.year)*12+b.month-a.month-1 for a,b in zip(dates,dates[1:]))
         result[name] = {"bcra_id": key, "frequency": "monthly", "unit": unit, "kind": kind,
+                        "scope": "aggregate_mortgages", "uva_specific": False,
+                        "uva_component": "not_separately_identified",
                         "currency": "pesos_serie_bcra", "missing_months": missing_months,
                         "historical_currency_and_methodology_breaks_unverified": True,
                         "observations": [{"date": d.isoformat(), "value": str(rows[key][d])} for d in dates]}

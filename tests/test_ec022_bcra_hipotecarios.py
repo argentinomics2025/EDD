@@ -6,6 +6,8 @@ class BcraMortgageTests(unittest.TestCase):
         out = parse(b"3772;31/01/2020;12.5\n4291;31/01/2020;100\n", "tas2_ser.txt")
         self.assertEqual(out["series"]["tasa_hipotecaria"]["kind"], "weighted_rate")
         self.assertEqual(out["series"]["monto_otorgado_hipotecario"]["kind"], "monthly_flow")
+        self.assertFalse(out["series"]["tasa_hipotecaria"]["uva_specific"])
+        self.assertEqual(out["series"]["tasa_hipotecaria"]["uva_component"], "not_separately_identified")
     def test_duplicate_fails(self):
         with self.assertRaises(ValueError):
             parse(b"3772;31/01/2020;1\n3772;31/01/2020;2\n4291;31/01/2020;3\n", "tas2_ser.txt")
