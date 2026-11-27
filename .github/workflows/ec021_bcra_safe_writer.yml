@@ -15,9 +15,14 @@ on:
       - "scripts/ec021_bcra_safe_writer.py"
       - "tests/test_ec021_bcra_safe_writer.py"
       - ".github/workflows/ec021_bcra_safe_writer.yml"
+  schedule:
+    # 20:00 AR (23 UTC), el mismo horario que el robot legado.
+    - cron: '0 23 * * *'
   push:
     branches: [main]
     paths:
+      - ".github/workflows/robot_bcra.yml"
+      - "tests/test_ec021_bcra_cutover.py"
       - "scripts/ec021_bcra_safe_writer.py"
       - "tests/test_ec021_bcra_safe_writer.py"
       - ".github/workflows/ec021_bcra_safe_writer.yml"
@@ -37,8 +42,8 @@ jobs:
           python-version: "3.11"
       - name: Instalar dependencias
         run: python -m pip install 'requests>=2.31,<3' 'psycopg[binary]>=3.2,<4'
-      - name: Probar 14 condiciones económicas y de seguridad
-        run: python -m unittest discover -s tests -p 'test_ec021_bcra_safe_writer.py' -v
+      - name: Probar seguridad económica, origen y cutover
+        run: python -m unittest discover -s tests -p 'test_ec021_bcra_*.py' -v
       - name: Leer API BCRA v4.0 real (sin DML)
         run: python -m scripts.ec021_bcra_safe_writer
   check_connection:
@@ -58,7 +63,7 @@ jobs:
         run: python -m scripts.ec021_bcra_safe_writer --check-db
   guarded_writer:
     needs: preflight
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.apply == true && vars.EC021_BCRA_WRITES_ENABLED == 'true' }}
+    if: ${{ vars.EC021_BCRA_WRITES_ENABLED == 'true' && (github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.apply == true)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -89,3 +94,19 @@ jobs:
               raise SystemExit('BCRA replay not idempotent')
           print('EC021_BCRA_IDEMPOTENT_REPLAY_PASS')
           PY
+
+  alert:
+    needs: [preflight, guarded_writer]
+    if: ${{ always() && (needs.preflight.result == 'failure' || needs.guarded_writer.result == 'failure') && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      issues: write
+    steps:
+      - name: Reportar falla del BCRA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_RUN_ID: ${{ github.run_id }}
+        run: |
+          gh issue comment 58 --repo "$GH_REPO" --body "⚠️ EC-021 BCRA: preflight o escritor exclusivo falló. Ver https://github.com/$GH_REPO/actions/runs/$GH_RUN_ID . No volver a habilitar el robot antiguo sin revisión."
