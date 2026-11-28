@@ -1,0 +1,13 @@
+# EC-022.1 — Idempotencia y permisos: evidencia parcial
+
+Base verificada: rama `ec022-hipotecarios-readonly` remota en `17e9048d51ede613609aeff2bc3f593d43deeeb3`. Durante esta ejecución `main` avanzó a `118a8a6197046162a191bb0dfebc9613f8a67d54`; se incorporó localmente sin conflicto. Sus cambios de EC-021 son los ya existentes en `main`.
+
+El SQL sigue marcado **prototipo, no aplicar a producción**. El ingestor carece de INSERT directo y llama a una función con propietario NOLOGIN/NOBYPASSRLS, búsqueda fijada y solo los privilegios necesarios. La función serializa por clave: inserción idéntica devuelve `no_change`; contenido contradictorio devuelve error y revierte el lote; otra huella conserva una edición separada. Se considera `recuperado` metadato de la primera descarga, no contenido de la edición: recuperaciones posteriores idénticas no producen una revisión.
+
+La tabla de aprobaciones ya no otorga SELECT a `anon` ni `authenticated`. La política pública usa una función limitada a verificar la aprobación vigente, con propietario NOLOGIN/NOBYPASSRLS y ruta de búsqueda fija. El catálogo distingue tipo y ámbito; los indicadores hipotecarios agregados no se describen como específicos UVA.
+
+En PostgreSQL 17 aislado, sobre un clúster nuevo local con roles de prueba, pasaron los escenarios: aprobación y revisión, ocultamiento y revocación, privilegios directos y heredados de prueba, ausencia de INSERT/UPDATE/DELETE directo del ingestor, repetición idéntica incluso con nueva fecha de recuperación, contradicción y rollback del lote, y dos escritores concurrentes con el mismo identificador y valores distintos: uno se insertó y el otro falló. Pasó también una prueba del escritor experimental con `inserted`, `no_change` y rollback. **Estas pruebas no equivalen a Supabase local** ni comprueban su API, configuración, privilegios reales o todas las intercalaciones posibles.
+
+El escritor `ec022_writer_draft.py` está desactivado por defecto, valida el hash del archivo recibido y utiliza transacción y rol exclusivo. No valida por sí solo que los datos normalizados deriven correctamente del archivo ni que la fuente haya sido económicamente aprobada; no se debe usar en producción. El flujo actual no proporciona una alerta operativa ni un contrato de API desplegado.
+
+Docker rechazó la conexión al pipe local desde el entorno de Codex, por lo que no se pudo iniciar Supabase local. El presupuesto y los roles efectivos de producción no se validaron. Sin esas pruebas, sin controles completos de integridad/procedencia y sin automatización segura, no corresponde promover el prototipo a migración definitiva ni escribir en producción. Las series específicas UVA siguen sin implementarse; las agregadas se etiquetan expresamente.
