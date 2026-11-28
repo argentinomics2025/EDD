@@ -1,8 +1,9 @@
 \set ON_ERROR_STOP on
-\echo 'EC-022 effective function privileges (expected f, f, t, t)'
+\echo 'EC-022 effective function privileges (expected f, f, f, t, t)'
 select
  has_function_privilege('anon','public.ec022_ingestar_observacion(text,date,text,numeric,text,timestamptz,date)','execute') as anon_writer,
  has_function_privilege('authenticated','public.ec022_ingestar_observacion(text,date,text,numeric,text,timestamptz,date)','execute') as authenticated_writer,
+ has_function_privilege('service_role','public.ec022_ingestar_observacion(text,date,text,numeric,text,timestamptz,date)','execute') as service_role_writer,
  has_function_privilege('ec022_ingestor','public.ec022_ingestar_observacion(text,date,text,numeric,text,timestamptz,date)','execute') as ingestor_writer,
  has_function_privilege('anon','ec022_privado.es_publicada(text,date,text)','execute') as anon_reader;
 \echo 'EC-022 function ownership, security, and explicit/effective ACL entries'
@@ -22,7 +23,7 @@ where d.defaclobjtype='f' and (d.defaclnamespace=0 or n.nspname in ('public','ec
 order by creator,schema,grantee;
 \echo 'Role memberships reachable from anon, authenticated and ec022_ingestor'
 with recursive paths(root,roleid,path) as (
- select oid,oid,array[oid] from pg_roles where rolname in ('anon','authenticated','ec022_ingestor')
+ select oid,oid,array[oid] from pg_roles where rolname in ('anon','authenticated','service_role','ec022_ingestor')
  union all
  select p.root,m.roleid,p.path||m.roleid from paths p join pg_auth_members m on m.member=p.roleid
  where not m.roleid=any(p.path)

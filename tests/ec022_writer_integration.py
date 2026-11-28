@@ -1,6 +1,7 @@
 """Only run on a newly created disposable local database after SQL tests."""
 import hashlib
 import os
+import re
 from datetime import date
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
@@ -13,9 +14,12 @@ parts=conninfo_to_dict(dsn)
 if parts.get('host') not in ('localhost','127.0.0.1','::1') or not parts.get('port'):
     raise SystemExit('Refusing non-local database')
 raw=b'fixture'
+series=os.environ.get('EC022_TEST_SERIES','test')
+if series != 'test' and not re.fullmatch(r'ec022_test_[0-9a-f]{12}',series):
+    raise SystemExit('Unexpected test series name')
 manifest={'source_url':'https://www.indec.gob.ar/test','source_sha256':hashlib.sha256(raw).hexdigest(),
           'retrieved_at':'2026-11-27T10:00:00Z','publication_date':None,
-          'observations':[{'series':'test','period':'2021-01-01','value':'3'}]}
+          'observations':[{'series':series,'period':'2021-01-01','value':'3'}]}
 rows=prepare(manifest,raw)
 with psycopg.connect(dsn,autocommit=True) as conn:
     conn.execute('set role ec022_ingestor')
@@ -26,5 +30,5 @@ with psycopg.connect(dsn,autocommit=True) as conn:
     try: write(conn,[fresh,tuple(changed)])
     except psycopg.errors.UniqueViolation: pass
     else: raise AssertionError('Contradictory content accepted')
-    assert conn.execute("select count(*) from public.ec022_observaciones where periodo='2021-02-01'").fetchone()[0]==0
+    assert conn.execute("select count(*) from public.ec022_observaciones where serie=%s and periodo='2021-02-01'",(series,)).fetchone()[0]==0
 print('writer insert, no_change, conflict and batch rollback passed')
