@@ -22,6 +22,10 @@ def parse(raw):
         if month == 13 and sheet.cell_value(i,3) == '' and sheet.cell_value(i,4) == '':
             continue  # BCRA's blank annual separator, not an observation.
         period=date(year,month,1)
+        # The BCRA notes identify new UVA loans only from May 2016. Earlier
+        # placeholders in the workbook do not establish zero disbursements.
+        if period < date(2016,5,1):
+            continue
         if rows:
             previous=date.fromisoformat(rows[-1]['date'])
             if (period.year-previous.year)*12+period.month-previous.month != 1:

@@ -34,3 +34,13 @@ class UvaTests(unittest.TestCase):
         self.assertEqual(result['scope'],'mortgages_uva')
         self.assertTrue(result['observations'][0]['zero_amount_rate_not_interpreted'])
         self.assertEqual(result['observations'][1]['annual_nominal_rate_percent'],'6.5')
+    def test_pre_series_placeholders_not_observations(self):
+        class EarlySheet(Sheet):
+            values=dict(Sheet.values, **{})
+        EarlySheet.values[(27,2)]=201604
+        EarlySheet.values[(28,2)]=201605
+        class EarlyBook(Book):
+            def sheet_by_name(self,name): return EarlySheet()
+        with patch('scripts.ec022_bcra_uva.xlrd.open_workbook',return_value=EarlyBook()):
+            result=parse(b'xls')
+        self.assertEqual([r['date'] for r in result['observations']],['2016-05-01'])

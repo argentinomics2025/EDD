@@ -6,6 +6,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from scripts.ec022_bcra_hipotecarios import BASE, parse as parse_bcra
+from scripts.ec022_bcra_uva import SOURCE as UVA_LOANS_URL, parse as parse_uva_loans
 from scripts.ec022_cvs import parse as parse_cvs
 from scripts.ec022_hipotecarios_readonly import BASE as API, collect, fetch, results
 from scripts.ec022_indec_salarios import URL as SALARIOS_URL, parse as parse_salarios
@@ -44,6 +45,9 @@ def main():
         data=parse_bcra(download(BASE+filename),filename)
         summary[filename]={'source':data['source'],'sha256':data['sha256'],
                            'series':{k:{**bounds(v['observations']),'missing_months':v['missing_months']} for k,v in data['series'].items()}}
+    uva_loans=parse_uva_loans(download(UVA_LOANS_URL))
+    summary['hipotecarios_uva']={**bounds(uva_loans['observations']),'source':UVA_LOANS_URL,
+                                'sha256':uva_loans['sha256'],'scope':uva_loans['scope']}
     print(json.dumps({'retrieved':now.isoformat(),'writes_to_supabase':False,'results':summary},ensure_ascii=False))
 
 if __name__=='__main__': main()

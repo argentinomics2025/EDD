@@ -5,6 +5,8 @@ permissions:
   contents: read
 jobs:
   probe:
+    # Opt-in only after DEC-006 budget and Actions quota are verified.
+    if: ${{ vars.EC022_PROBE_ENABLED == '1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -13,5 +15,8 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install -r requirements-ec022.txt
-      - run: python -m unittest tests.test_ec022_readonly tests.test_ec022_indec_salarios tests.test_ec022_cvs tests.test_ec022_bcra_hipotecarios tests.test_ec022_ripte_historico tests.test_ec022_ipc tests.test_ec022_fuentes_historicas
+      - run: python -m unittest tests.test_ec022_readonly tests.test_ec022_indec_salarios tests.test_ec022_cvs tests.test_ec022_bcra_hipotecarios tests.test_ec022_ripte_historico tests.test_ec022_ipc tests.test_ec022_fuentes_historicas tests.test_ec022_writer_draft tests.test_ec022_bcra_uva tests.test_ec022_prepare_uva tests.test_ec022_prepare_archivos
       - run: python -m scripts.ec022_probe
+      - name: Registrar alerta de fallo
+        if: ${{ failure() }}
+        run: echo '::error::EC-022: falló la validación de fuentes; revisar el resultado del workflow.'
